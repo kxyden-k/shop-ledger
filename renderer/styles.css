@@ -1,0 +1,102 @@
+/* ---- colours: light by default, dark from the OS setting or data-theme="dark" ---- */
+:root {
+  --bg: #f3f1ec; --panel: #fff; --ink: #1d2a2e; --mute: #667478; --line: #d9d5ca;
+  --acc: #1f5f5b; --acc-ink: #fff; --good: #1d7a46; --bad: #b3362b; --warn: #fbeed0;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141b1d; --panel: #1c2629; --ink: #e6ecec; --mute: #8d9fa3; --line: #2e3b3f;
+    --acc: #5fb3ac; --acc-ink: #0d1516; --good: #4cc287; --bad: #ef7a6e; --warn: #3a3217;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141b1d; --panel: #1c2629; --ink: #e6ecec; --mute: #8d9fa3; --line: #2e3b3f;
+  --acc: #5fb3ac; --acc-ink: #0d1516; --good: #4cc287; --bad: #ef7a6e; --warn: #3a3217;
+  color-scheme: dark;
+}
+
+/* ---- page frame ---- */
+html { scroll-padding-top: env(safe-area-inset-top, 0px) }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 14px 20px; border-bottom: 2px solid var(--ink) }
+h1 { margin: 0; font: 700 22px Georgia, "Times New Roman", serif; letter-spacing: .2px }
+#ver { color: var(--mute) }
+nav { display: flex; gap: 4px; flex-wrap: wrap }
+nav button { background: none; border: 0; border-bottom: 3px solid transparent; color: var(--mute); padding: 6px 10px; font: inherit; cursor: pointer }
+nav button.on { color: var(--ink); border-color: var(--acc); font-weight: 600 }
+.badge { background: var(--bad); color: #fff; border-radius: 9px; padding: 0 6px; font-size: 12px }
+main { padding: 20px; max-width: 1150px; margin: 0 auto }
+h2 { font: 700 18px Georgia, serif; margin: 0 0 10px }
+
+/* ---- layout ---- */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; margin-bottom: 16px }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end }
+.row label { display: flex; flex-direction: column; font-size: 13px; color: var(--mute); gap: 2px }
+
+/* ---- stat tiles ---- */
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px }
+.stat small { color: var(--mute); display: block }
+.stat b { font: 700 22px Georgia, serif }
+.stat.net { border: 2px solid var(--acc) }
+.pos { color: var(--good) }
+.neg { color: var(--bad) }
+
+/* ---- tables ---- */
+.scroll { overflow-x: auto }
+table { border-collapse: collapse; width: 100%; min-width: 640px }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap }
+th { color: var(--mute); font-weight: 600; font-size: 13px }
+td.n, th.n { text-align: right }
+td input { width: 84px; text-align: right }
+td input.t { width: 140px; text-align: left }
+.low { background: var(--warn) } /* product at or below its reorder level */
+tr.cancelled td { color: var(--mute) }
+tr.cancelled td.n { text-decoration: line-through } /* cancelled orders don't count towards totals */
+tr.selected { background: color-mix(in srgb, var(--acc) 16%, transparent) }
+td.items { max-width: 260px; overflow: hidden; text-overflow: ellipsis }
+
+/* ---- form controls ---- */
+input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; max-width: 100% }
+input:focus-visible, select:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px }
+textarea { width: 100%; height: 120px; font: 12px monospace }
+.btn { background: var(--acc); color: var(--acc-ink); border: 0; border-radius: 4px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer }
+.btn.alt { background: none; color: var(--ink); border: 1px solid var(--line) }
+.btn.del { background: none; color: var(--bad); border: 1px solid var(--bad) }
+.btn.del.armed { background: var(--bad); color: var(--panel) } /* waiting for the confirming click */
+.btn.sm { padding: 3px 9px; font-size: 13px }
+.btn:disabled { opacity: .55; cursor: default }
+.btn:disabled[data-label] { cursor: progress } /* busy: see whileBusy() */
+form.row { margin: 0 }
+
+/* ---- notices ---- */
+.msg { background: var(--warn); border-left: 4px solid var(--acc); padding: 8px 12px; margin-bottom: 14px }
+.warnbar { border-left-color: var(--bad) }
+.empty { color: var(--mute); padding: 10px 0 }
+/* corner notice for results and errors, see showMessage() / showError() */
+.toast {
+  position: fixed; right: 20px; bottom: 20px; z-index: 10; max-width: min(440px, calc(100vw - 32px));
+  display: flex; gap: 12px; align-items: flex-start; padding: 10px 10px 10px 14px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 6px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .2);
+}
+.toast.error { border-left-color: var(--bad) }
+.toast[hidden] { display: none }
+.toast-close { background: none; border: 0; color: var(--mute); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px }
+
+/* ---- charts ---- */
+.legend { color: var(--mute); font-size: 13px }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 5px 0 14px }
+.legend i:first-child { margin-left: 0 }
+/* horizontal bar row: label | bar track | value */
+.hb { display: grid; grid-template-columns: minmax(80px, 150px) 1fr 100px; gap: 8px; align-items: center; margin: 6px 0 }
+.hb span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.hb div { background: var(--bg); border-radius: 3px; height: 14px }
+.hb b { display: block; height: 14px; border-radius: 3px }
+.hb em { font-style: normal; text-align: right }
