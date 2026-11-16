@@ -13,7 +13,7 @@ function productsScreen() {
   <label>Change by %<input id="bulk" type="number" step="0.1" placeholder="e.g. 5 or -10" style="width:130px"></label>
   <button class="btn alt">Apply to every product</button></form>`);
 
-  return addCard + bulkCard + card('Products', productList());
+  return stockHistoryPanel() + addCard + bulkCard + card('Products', productList());
 }
 
 function productList() {
@@ -22,9 +22,9 @@ function productList() {
   const shown = db.products.filter(p => !q || ((p.sku || '') + ' ' + p.name).toLowerCase().includes(q));
   const search = `<div class="row" style="margin-bottom:8px">${searchBox('prod-search', ui.productSearch, 'setProductSearch', 'Name or SKU')}</div>`;
   if (!shown.length) return search + emptyNote('No products match.');
-  const headers = [th('SKU'), th('Name'), thNum('Cost'), thNum('Price'), thNum('Profit/unit'), thNum('Margin'), thNum('Markup'), thNum('Stock'), thNum('Reorder at'), thNum('Stock value'), th('')];
+  const headers = [th('SKU'), th('Name'), thNum('Cost'), thNum('Price'), thNum('Profit/unit'), thNum('Margin'), thNum('Markup'), thNum('Stock'), thNum('Reorder at'), thNum('Stock value'), th(''), th('')];
   return search + table(headers, shown.map(productRow).join(''))
-    + '<p class="empty">Edit any cell and it saves straight away. Shaded rows are at or below their reorder level. Hover a price to see its past values.</p>';
+    + '<p class="empty">Edit any cell and it saves straight away. Shaded rows are at or below their reorder level. Hover a price to see its past values. History lists every sale, purchase, return and hand edit of stock.</p>';
 }
 
 function setProductSearch(text) { ui.productSearch = text; render(); }
@@ -52,6 +52,7 @@ function productRow(p) {
     ${numberCell('stock', 'Stock', 'step="1"')}
     ${numberCell('reorder', 'Reorder level', 'step="1" min="0"')}
     <td class="n">${money(p.stock * p.cost)}</td>
+    <td><button type="button" class="btn alt sm" data-focus="hist-${p.id}" aria-label="Stock history of ${name}" onclick="openStockHistory(${p.id})">History</button></td>
     <td>${deleteButton('p' + p.id, p.name, `deleteProduct(${p.id})`)}</td></tr>`;
 }
 
@@ -59,10 +60,9 @@ function addProduct() {
   const field = id => $('#f-' + id).value;
   const name = field('name').trim();
   if (!name) return showError('Enter a product name.', '#f-name');
-  db.products.push({
-    id: newId(), sku: field('sku').trim(), name,
-    cost: +field('cost') || 0, price: +field('price') || 0, stock: +field('stock') || 0, reorder: +field('re') || 0, h: []
-  });
+  const product = { id: newId(), sku: field('sku').trim(), name, cost: +field('cost') || 0, price: +field('price') || 0, stock: 0, reorder: +field('re') || 0, h: [] };
+  db.products.push(product);
+  moveStock(db, product.id, +field('stock') || 0, 'Opening stock', 'Product added', today());
   save();
   showMessage('Added ' + name + '.', '#f-sku');
 }
@@ -81,6 +81,7 @@ function setProductNumber(id, field, text) {
   const value = +text;
   if (isNaN(value)) return renderSoon(); // puts the old value back in the box
   if (field === 'price') setPrice(p, value, today());
+  else if (field === 'stock') setStock(db, p, value, today());
   else p[field] = value;
   save();
   renderSoon();
@@ -96,8 +97,36 @@ function changeAllPricesBy() {
 
 function deleteProduct(id) {
   if (!confirmed('p' + id)) return;
+  if (ui.historyProductId === id) ui.historyProductId = null;
   const p = findProduct(id);
   db.products = db.products.filter(x => x.id !== id);
   save();
   showMessage('Deleted ' + p.name + '. Past orders keep their details.');
+}
+
+// ---- stock history ----
+
+function openStockHistory(id) {
+  ui.historyProductId = id;
+  ui.afterRender = { scroll: '#stock-history', focus: '#stock-history-close' };
+  render();
+}
+
+function closeStockHistory() {
+  const id = ui.historyProductId;
+  ui.historyProductId = null;
+  ui.afterRender = { focus: `[data-focus="hist-${id}"]` };
+  render();
+}
+
+function stockHistoryPanel() {
+  const p = ui.historyProductId && findProduct(ui.historyProductId);
+  if (!p) return '';
+  const moves = stockHistory(db, p.id), shown = moves.slice(0, 200);
+  const rows = shown.map(m => `<tr><td>${m.date}</td><td class="n ${m.q < 0 ? 'neg' : 'pos'}">${m.q > 0 ? '+' : '−'}${Math.abs(m.q)}</td><td>${esc(m.why)}</td><td>${esc(m.ref || '')}</td></tr>`).join('');
+  const body = rows
+    ? table([th('Date'), thNum('Change'), th('Reason'), th('Reference')], rows) + (moves.length > shown.length ? `<p class="empty">Showing the latest ${shown.length} of ${moves.length} changes.</p>` : '')
+    : emptyNote('No stock changes recorded yet. History starts from version 2.0 of the app, so earlier sales are not listed.');
+  return card('Stock history: ' + esc(p.name), `<p>${p.stock} in stock now · reorder at ${p.reorder}</p>${body}
+  <div class="row" style="margin-top:10px"><button class="btn alt" id="stock-history-close" onclick="closeStockHistory()">Close</button></div>`, 'stock-history');
 }

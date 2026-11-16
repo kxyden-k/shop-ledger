@@ -30,6 +30,14 @@ const th = label => `<th>${label}</th>`;
 const thNum = label => `<th class="n">${label}</th>`;
 const table = (headers, rows) => `<div class="scroll"><table><tr>${headers.join('')}</tr>${rows}</table></div>`;
 
+// Buttons that switch between the views inside one tab. views: [[key, label], ...]
+const subNav = (views, current, handler) =>
+  `<div class="subnav" role="tablist">${views.map(([key, label]) =>
+    `<button role="tab" aria-selected="${key === current}" class="${key === current ? 'on' : ''}" data-focus="view-${key}" onclick="${handler}('${key}')">${label}</button>`).join('')}</div>`;
+
+// A small coloured label, e.g. the payment state of an order. tone: 'good' | 'bad' | 'warn' | ''
+const tag = (label, tone = '') => `<span class="tag ${tone}">${label}</span>`;
+
 // pairs: [[value, label], ...]
 const options = (pairs, selected) =>
   pairs.map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('');

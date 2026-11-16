@@ -6,9 +6,13 @@ const TABS = {
   prod: { label: 'Products & stock', screen: productsScreen },
   ord: { label: 'Orders', screen: ordersScreen },
   cust: { label: 'Customers', screen: customersScreen },
+  buy: { label: 'Purchasing', screen: purchasingScreen },
   exp: { label: 'Expenses', screen: expensesScreen },
+  rep: { label: 'Reports', screen: reportsScreen },
   set: { label: 'Settings', screen: settingsScreen }
 };
+// The developer's own tab. It only exists when running from source with the private key present.
+if (licencesAvailable()) TABS.lic = { label: 'Licences', screen: licencesScreen };
 
 function navButtons() {
   const lowStock = db.products.filter(isLowStock).length;
@@ -35,7 +39,7 @@ function render() {
 
   $('#ver').textContent = 'v' + window.api.info().version;
   $('#nav').innerHTML = navButtons();
-  $('#app').innerHTML = backupBanner() + TABS[ui.tab].screen();
+  $('#app').innerHTML = backupBanner() + sendPanel() + TABS[ui.tab].screen();
 
   const after = ui.afterRender || {};
   ui.afterRender = null;
@@ -47,11 +51,14 @@ function render() {
   if (after.scroll && $(after.scroll)) $(after.scroll).scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Escape backs out of whatever is open: a delete waiting to be confirmed, then the invoice panel, then the notice.
+// Escape backs out of whatever is open, innermost first.
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (ui.confirming) { ui.confirming = null; render(); }
-  else if (ui.invoiceOrderId) closeInvoice();
+  else if (ui.send) closeSend();
+  else if (ui.creditForm) toggleCreditForm(false);
+  else if (ui.tab === 'ord' && ui.openOrderId) closeOrder();
+  else if (ui.tab === 'prod' && ui.historyProductId) closeStockHistory();
   else hideToast();
 });
 

@@ -3,7 +3,7 @@ Desktop app (Electron) for orders, stock, pricing, profit and margins. Data is s
 
     npm install     # once
     npm start       # run it
-    npm test        # test the data layer
+    npm test        # test the data layer, business rules, reports and documents
     npm run dist    # build a Windows installer into dist/
 
 Before first release: put your GitHub username in `package.json` (`build.publish.owner`).

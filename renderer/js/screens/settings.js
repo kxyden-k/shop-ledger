@@ -85,8 +85,7 @@ async function restoreBackup(file, button) {
   }
   if (result.ok) {
     reloadData();
-    ui.draft = emptyDraftOrder();
-    ui.selectedCustomer = ui.invoiceOrderId = null;
+    resetScreens();
   }
   showResult(result);
 }
@@ -200,7 +199,7 @@ function manualDataCard() {
   <textarea id="bk" aria-label="Data as text">${esc(JSON.stringify(db))}</textarea>
   <div class="row" style="margin-top:8px"><button class="btn" onclick="loadPastedData()">Load pasted backup</button>
   <button class="btn del${armed ? ' armed' : ''}" data-focus="del-wipe" onclick="eraseAllData()">${armed ? 'Confirm: erase everything' : 'Erase all data'}</button></div>
-  <p class="empty">Erasing removes all products, orders and expenses. Business details, email settings and invoice numbering are kept.</p>`);
+  <p class="empty">Erasing removes all products, orders, quotes, credit notes, suppliers, purchase orders and expenses. Business details, email settings and document numbering are kept.</p>`);
 }
 
 function loadPastedData() {
@@ -218,7 +217,6 @@ function eraseAllData() {
   if (!confirmed('wipe')) return;
   db = clearRecords(db);
   save();
-  ui.draft = emptyDraftOrder();
-  ui.selectedCustomer = ui.invoiceOrderId = null;
-  showMessage('All products, orders and expenses erased.');
+  resetScreens();
+  showMessage('All records erased.');
 }

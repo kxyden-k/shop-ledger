@@ -95,3 +95,25 @@ Files from older app versions restore fine and are upgraded automatically; files
 **What is not in the backup.** Only business data (products, orders, customers' details on orders, expenses, business details, invoice numbers). The email password, PIN, access token and backup settings stay on the machine, so on a new computer redo Email setup, PIN and the backup folder. The access token is yours to reissue.
 
 **Support checklist:** on a visit, confirm the red bar is absent, click Back up now, open the folder and check today's file is there, and do a trial restore on a spare machine at least once per customer.
+
+## 12. Payments, quotes, credit notes, purchasing and reports (added in 2.0.0)
+**Data version 3.** On first launch the app upgrades existing data (after writing `backups\pre-migrate-v2.json`):
+- Every order now stores the tax rate it was made under, and a list of payments. Orders that were already Paid, Shipped or Completed are given one payment for their full amount on the order date, so nobody suddenly appears to owe money. Pending orders show as owing.
+- New lists: `quotes`, `credits`, `suppliers`, `purchases`, `moves` (stock history), plus the counters `nextQuote`, `nextCredit`, `nextPurchase`. Expenses gain a category.
+
+**How the pieces fit**
+- **Payments** are recorded on an order (Orders > Open). Part payments are fine. Choosing the Paid status records whatever is still owed. A cancelled or credited order that was already paid shows "Refund due", settled by recording a refund.
+- **Credit notes** are raised from the order they relate to. They take money off that order and off sales on the day they are issued, and can put the goods back in stock. Numbers run CN-0001 upwards and never repeat.
+- **Quotes** are saved from the order form ("Save as quote"), do not touch stock, last 30 days, and become an order with "Make order". Numbers run QUO-0001 upwards.
+- **Purchase orders** (Purchasing tab) only change stock when "Receive stock" is clicked. Receiving sets the product's cost to the weighted average of old and new stock. Buying stock is deliberately not an expense: its cost counts when the goods are sold.
+- **Stock history** (Products > History) lists every change from 2.0.0 onwards. Sales before the upgrade are not listed.
+- **Statements** are sent from a customer's panel on the Customers tab. "Who owes you" splits debts by the age of each unpaid order.
+- **Reports** can be exported to CSV (opens in Excel) or saved as PDF. The tax report covers tax collected on sales only; the app does not record tax paid on expenses.
+
+**Code map.** Rules are in `renderer/js/ledger.js`, reports in `renderer/js/reports.js`, PDF contents in `renderer/js/documents.js` (all three are tested and have no screen code). `pdf-template.js` turns any document into the printed page.
+
+## 13. Licences screen (developer only, added in 2.0.0)
+When you run the app from source (`npm start`) on the machine that has `keys/private.pem`, a **Licences** tab appears. It does the same as the command-line tools in section 10: issue a token (with optional expiry), list every token and its status, revoke and restore.
+- It never appears in installed copies: the installer contains neither `tools/` nor `keys/`, and the app only loads this code when it is not packaged.
+- A newly issued token is shown once with a Copy button. It is not stored, only its id and name are (`keys/issued.json`).
+- Revoking or restoring changes `access/revoked.json` on your machine. It takes effect when that file reaches GitHub: use the "Commit and push now" button in the red bar, or commit and push it yourself.

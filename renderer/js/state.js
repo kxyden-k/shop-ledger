@@ -6,13 +6,21 @@
 let db = window.api.load();
 
 const emptyDraftOrder = () => ({ cust: '', email: '', date: today(), fee: 0, items: [] });
+const emptyDraftPurchase = () => ({ supplierId: null, date: today(), items: [] });
 
 const ui = {
   tab: 'dash',
   period: 'all',            // dashboard period, see isInPeriod()
   confirming: null,         // the delete button waiting for its second click, e.g. 'p12' or 'wipe'
-  invoiceOrderId: null,     // order whose invoice panel is open
+  ordersView: 'orders',     // Orders tab: 'orders' | 'quotes' | 'credits'
+  openOrderId: null,        // order whose panel (payments, credit notes, invoice) is open
+  creditForm: false,        // the "new credit note" form inside the order panel
+  send: null,               // the "send as PDF or email" panel, see screens/send.js
   draft: emptyDraftOrder(), // the "New order" form
+  purchasingView: 'orders', // Purchasing tab: 'orders' | 'suppliers'
+  purchaseDraft: emptyDraftPurchase(),
+  historyProductId: null,   // product whose stock history is open
+  report: { id: 'pnl', preset: 'year', from: '', to: '' },
   productSearch: '',
   orderSearch: '',
   orderStatusFilter: '',    // '' shows every status
@@ -29,9 +37,15 @@ const newId = () => db.n++;
 
 const findProduct = id => productById(db.products, id);
 const findOrder = id => db.orders.find(o => o.id === id);
-const customers = () => summarizeCustomers(db.orders);
+const customers = () => summarizeCustomers(db);
 
-const money = v => (v < 0 ? '−' : '') + db.cur + Math.abs(+v || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = v => fmtMoney(db.cur, v);
+
+// Forget anything on screen that points at records, after the data is replaced or erased.
+function resetScreens() {
+  Object.assign(ui, { openOrderId: null, creditForm: false, send: null, selectedCustomer: null, historyProductId: null,
+    draft: emptyDraftOrder(), purchaseDraft: emptyDraftPurchase() });
+}
 
 function goTo(tab) {
   ui.tab = tab;

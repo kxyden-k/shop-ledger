@@ -1,13 +1,20 @@
-// Orders tab: build a new order, change order status, send or save invoices.
+// Orders tab. Three views: orders (new order form, list, and a panel per order for payments,
+// credit notes and the invoice), quotes, and credit notes.
 // Stock comes off when an order is saved and goes back if the order is cancelled.
 
+const ORDER_VIEWS = [['orders', 'Orders'], ['quotes', 'Quotes'], ['credits', 'Credit notes']];
+
 function ordersScreen() {
-  return invoicePanel() + newOrderCard() + orderListCard();
+  const nav = subNav(ORDER_VIEWS, ui.ordersView, 'setOrdersView');
+  if (ui.ordersView === 'quotes') return nav + quotesCard();
+  if (ui.ordersView === 'credits') return nav + creditsCard();
+  return nav + orderPanel() + newOrderCard() + orderListCard();
 }
+
+function setOrdersView(view) { ui.ordersView = view; ui.confirming = null; render(); }
 
 // ---- order list ----
 
-const itemSummary = o => o.items.map(i => i.q + ' × ' + i.n).join(', ');
 const orderSearchText = o => ['#' + o.no, o.cust, o.email, o.invoiceNo || '', itemSummary(o)].join(' ').toLowerCase();
 
 function orderListCard() {
@@ -18,31 +25,170 @@ function orderListCard() {
   const filters = `<div class="row" style="margin-bottom:8px">${searchBox('ord-search', ui.orderSearch, 'setOrderSearch', 'Customer, number, invoice or item', 280)}
   <label>Status<select id="ord-status" onchange="setOrderStatusFilter(this.value)">${statusOptions}</select></label></div>`;
   if (!shown.length) return card('Orders', filters + emptyNote('No orders match.'));
-  const headers = [th('No.'), th('Date'), th('Customer'), th('Items'), thNum('Revenue'), thNum('Costs'), thNum('Profit'), thNum('Margin'), th('Status'), th('Invoice')];
+  const headers = [th('No.'), th('Date'), th('Customer'), th('Items'), thNum('Revenue'), thNum('Costs'), thNum('Profit'), thNum('Margin'), th('Status'), th('Payment'), th('')];
   return card('Orders', filters + table(headers, shown.slice().reverse().map(orderRow).join(''))
-    + '<p class="empty">Stock is taken off when an order is saved and returned if it is cancelled. Cancelled orders are greyed out and don\'t count towards totals.</p>');
+    + '<p class="empty">Open an order to record payments, send its invoice or issue a credit note. Cancelled orders are greyed out and don\'t count towards totals.</p>');
 }
 
 function setOrderSearch(text) { ui.orderSearch = text; render(); }
 function setOrderStatusFilter(status) { ui.orderStatusFilter = status; render(); }
 
+// "Paid", "R50.00 owed" and so on, as a coloured label.
+function paymentTag(o) {
+  const state = paymentState(db, o), balance = orderBalance(db, o);
+  if (isCancelled(o) && !balance) return '–';
+  if (state === 'Paid') return tag('Paid', 'good');
+  if (state === 'Refund due') return tag('Refund due ' + money(-balance), 'bad');
+  return tag(money(balance) + ' owed' + (state === 'Part paid' ? ' (part paid)' : ''), 'warn');
+}
+
 function orderRow(o) {
   const profit = orderProfit(o), revenue = orderRevenue(o), items = itemSummary(o);
   const statusSelect = `<select data-focus="status-${o.id}" aria-label="Status of order #${o.no}" onchange="setOrderStatus(${o.id},this.value)">${ORDER_STATUSES.map(s => `<option ${o.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
-  const invoiceButton = isCancelled(o) ? '' : `<button class="btn alt sm" data-focus="inv-${o.id}" onclick="openInvoice(${o.id})">Invoice</button>`;
-  return `<tr class="${isCancelled(o) ? 'cancelled' : ''}">
+  return `<tr class="${isCancelled(o) ? 'cancelled' : ''}${ui.openOrderId === o.id ? ' selected' : ''}">
   <td>#${o.no}</td><td>${o.date}</td><td>${esc(o.cust || '–')}</td>
   <td class="items" title="${esc(items)}">${esc(items)}</td>
   <td class="n">${money(revenue)}</td><td class="n">${money(orderCost(o) + orderFee(o))}</td>
   <td class="n ${signClass(profit)}">${money(profit)}</td><td class="n">${percent(profit, revenue)}</td>
-  <td>${statusSelect}</td><td>${o.invoiceNo ? esc(o.invoiceNo) + ' ' : ''}${invoiceButton}</td></tr>`;
+  <td>${statusSelect}</td><td>${paymentTag(o)}</td>
+  <td>${o.invoiceNo ? esc(o.invoiceNo) + ' ' : ''}<button class="btn alt sm" data-focus="open-${o.id}" aria-label="Open order #${o.no}" onclick="openOrder(${o.id})">Open</button></td></tr>`;
 }
 
 function setOrderStatus(id, status) {
-  const error = changeOrderStatus(db.products, findOrder(id), status);
+  const order = findOrder(id), paidBefore = orderPaid(order);
+  const error = changeOrderStatus(db, order, status, today());
   if (error) { render(); return showError(error); } // render puts the old status back in the box
   save();
+  const recorded = orderPaid(order) - paidBefore;
+  if (recorded > 0) return showMessage('Order #' + order.no + ' marked as paid: payment of ' + money(recorded) + ' recorded.');
   renderSoon();
+}
+
+// ---- one order: payments, credit notes, invoice ----
+
+function openOrder(id) {
+  ui.openOrderId = id;
+  ui.creditForm = false;
+  ui.afterRender = { scroll: '#order-panel', focus: '#order-panel-close' };
+  render();
+}
+
+function closeOrder() {
+  const id = ui.openOrderId;
+  ui.openOrderId = null;
+  ui.creditForm = false;
+  ui.afterRender = { focus: `[data-focus="open-${id}"]` };
+  render();
+}
+
+function orderPanel() {
+  const o = ui.openOrderId && findOrder(ui.openOrderId);
+  if (!o) return '';
+  const totals = orderTotals(o), credited = orderCredited(db, o), balance = orderBalance(db, o), cancelled = isCancelled(o);
+  const balanceLabel = balance > 0 ? 'Still owed' : balance < 0 ? 'Refund due to customer' : 'Balance';
+  return card(`Order #${o.no} · ${esc(o.cust || 'Walk-in customer')}`, `
+  <p>${o.date} · ${esc(itemSummary(o))} · status ${o.status}${o.invoiceNo ? ' · invoice ' + esc(o.invoiceNo) : ''}</p>
+  <div class="grid">
+  ${stat(cancelled ? 'Order total (cancelled, not charged)' : totals.rate ? `Order total (incl. ${totals.rate}% tax)` : 'Order total', money(totals.total))}
+  ${credited ? stat('Credit notes', money(-credited)) : ''}
+  ${stat('Paid', money(orderPaid(o)))}
+  ${stat(balanceLabel, money(Math.abs(balance)), { tile: 'net', valueClass: balance > 0 ? 'neg' : balance < 0 ? 'neg' : 'pos' })}</div>
+  <h3>Payments</h3>${paymentList(o)}${paymentForm(o, balance)}
+  <h3>Credit notes</h3>${creditSection(o)}
+  <div class="row" style="margin-top:14px">${cancelled ? '' : `<button class="btn" onclick="openInvoice(${o.id})">Invoice…</button>`}<button class="btn alt" id="order-panel-close" onclick="closeOrder()">Close</button></div>`, 'order-panel');
+}
+
+function paymentList(o) {
+  if (!o.payments.length) return emptyNote('No payments recorded yet.');
+  const rows = o.payments.map(p => `<tr><td>${p.date}</td><td>${esc(p.method || '–')}</td><td>${esc(p.note || '')}</td><td class="n ${p.amt < 0 ? 'neg' : ''}">${money(p.amt)}</td><td>${deleteButton('pay' + p.id, 'payment of ' + money(p.amt), `deletePayment(${o.id},${p.id})`)}</td></tr>`).join('');
+  return table([th('Date'), th('Method'), th('Note'), thNum('Amount'), th('')], rows);
+}
+
+function paymentForm(o, balance) {
+  if (!balance) return '';
+  const refund = balance < 0;
+  return `<form class="row" style="margin-top:8px" onsubmit="recordPayment(${refund});return false">
+  <label>Date<input id="pay-date" type="date" value="${today()}"></label>
+  <label>${refund ? 'Refund amount' : 'Amount received'}<input id="pay-amt" type="number" step="0.01" min="0.01" value="${Math.abs(balance)}" style="width:120px"></label>
+  <label>Method<select id="pay-method">${PAYMENT_METHODS.map(m => `<option>${m}</option>`).join('')}</select></label>
+  <label>Note<input id="pay-note" placeholder="Optional, e.g. a reference" style="width:200px"></label>
+  <button class="btn">${refund ? 'Record refund' : 'Record payment'}</button></form>`;
+}
+
+function recordPayment(isRefund) {
+  const o = findOrder(ui.openOrderId), amount = +$('#pay-amt').value;
+  if (!(amount > 0)) return showError('Enter an amount greater than zero.', '#pay-amt');
+  const error = addPayment(db, o, { date: $('#pay-date').value || today(), amt: isRefund ? -amount : amount, method: $('#pay-method').value, note: $('#pay-note').value.trim() });
+  if (error) return showError(error, '#pay-amt');
+  save();
+  const left = orderBalance(db, o);
+  showMessage((isRefund ? 'Refund' : 'Payment') + ' of ' + money(amount) + ' recorded. ' + (left ? money(Math.abs(left)) + (left > 0 ? ' still owed.' : ' refund still due.') : 'Order #' + o.no + ' is settled.'));
+}
+
+function deletePayment(orderId, paymentId) {
+  if (!confirmed('pay' + paymentId)) return;
+  removePayment(findOrder(orderId), paymentId);
+  save();
+  showMessage('Payment removed.');
+}
+
+function creditSection(o) {
+  const credits = creditsOf(db, o);
+  const list = credits.length
+    ? table([th('No.'), th('Date'), th('Items'), thNum('Amount'), th('Stock'), th('')], credits.map(c => `<tr><td>${esc(c.no)}</td><td>${c.date}</td><td class="items">${esc(itemSummary(c))}</td><td class="n">${money(orderTotals(c).total)}</td><td>${c.restock ? 'Returned to stock' : 'Not returned'}</td><td><button class="btn alt sm" data-focus="send-${c.id}" onclick="sendCredit(${c.id})">Send…</button></td></tr>`).join(''))
+    : emptyNote('None. Use a credit note when goods come back or you agree to take money off an order.');
+  if (isCancelled(o)) return list;
+  const lines = creditableItems(db, o);
+  if (!lines.some(l => l.left > 0)) return list + '<p class="empty">Everything on this order has been credited.</p>';
+  if (!ui.creditForm) return list + `<div class="row"><button class="btn alt" id="credit-new" onclick="toggleCreditForm(true)">New credit note</button></div>`;
+  const rows = lines.map(l => `<tr><td>${esc(l.n)}</td><td class="n">${l.q}</td><td class="n">${money(l.p)}</td><td class="n">${l.left}</td><td class="n"><input id="cr-q-${l.line}" type="number" min="0" max="${l.left}" step="1" value="0" aria-label="Quantity of ${esc(l.n)} to credit"${l.left ? '' : ' disabled'}></td></tr>`).join('');
+  return list + `<form onsubmit="saveCredit();return false" style="margin-top:10px">
+  ${table([th('Item'), thNum('Sold'), thNum('Price'), thNum('Can credit'), thNum('Credit now')], rows)}
+  <div class="row" style="margin-top:8px"><label>Reason<input id="cr-reason" placeholder="e.g. Returned, damaged in transit" style="width:280px"></label>
+  <label style="flex-direction:row;align-items:center;gap:6px"><input id="cr-restock" type="checkbox" checked>Goods came back, return them to stock</label>
+  <button class="btn">Save credit note</button><button type="button" class="btn alt" onclick="toggleCreditForm(false)">Cancel</button></div></form>`;
+}
+
+function toggleCreditForm(show) {
+  ui.creditForm = show;
+  ui.afterRender = { focus: show ? '#order-panel input[id^="cr-q-"]:not([disabled])' : '#credit-new' };
+  render();
+}
+
+function saveCredit() {
+  const o = findOrder(ui.openOrderId);
+  const quantities = o.items.map((item, line) => +$('#cr-q-' + line).value || 0);
+  const result = createCredit(db, o, quantities, { reason: $('#cr-reason').value.trim(), restock: $('#cr-restock').checked, date: today() });
+  if (result.error) return showError(result.error);
+  save();
+  ui.creditForm = false;
+  const balance = orderBalance(db, o);
+  showMessage('Credit note ' + result.credit.no + ' saved.' + (balance < 0 ? ' A refund of ' + money(-balance) + ' is now due: record it under Payments.' : ''));
+}
+
+function sendCredit(id) {
+  const c = db.credits.find(x => x.id === id);
+  openSend({
+    title: 'Credit note ' + c.no, to: c.email, returnFocus: `[data-focus="send-${id}"]`,
+    message: 'Hi ' + (c.cust || 'there') + ',\n\nPlease find your credit note attached.' + signOff(),
+    prepare: () => ({ doc: creditDoc(db, c), filename: 'Credit note ' + c.no, subject: 'Credit note ' + c.no + ' from ' + db.biz.name })
+  });
+}
+
+// The invoice number is assigned the first time the invoice is saved or emailed, and then fixed.
+function openInvoice(id) {
+  const o = findOrder(id);
+  openSend({
+    title: `Invoice for order #${o.no}${o.invoiceNo ? ' (' + esc(o.invoiceNo) + ')' : ''}`, to: o.email, returnFocus: '#order-panel-close',
+    message: 'Hi ' + (o.cust || 'there') + ',\n\nPlease find your invoice attached.' + signOff(),
+    hint: 'The invoice number is assigned the first time you save or email it and never changes. Payments and credit notes already recorded are shown on it.',
+    prepare(to) {
+      if (to) o.email = to;
+      if (!o.invoiceNo) o.invoiceNo = docNumber(db.biz.prefix || 'INV-', db.nextInvoice++);
+      save();
+      return { doc: invoiceDoc(db, o), filename: 'Invoice ' + o.invoiceNo, subject: 'Invoice ' + o.invoiceNo + ' from ' + db.biz.name };
+    }
+  });
 }
 
 // ---- new order form (ui.draft) ----
@@ -59,8 +205,9 @@ function newOrderCard() {
     : '';
   const summary = draft.items.length ? draftSummary()
     : inStock.length ? 'Add items to build the order.' : 'Add products with stock before creating an order.';
+  const none = draft.items.length ? '' : ' disabled';
 
-  return card('New order', `<div class="row">
+  return card('New order or quote', `<div class="row">
   <label>Customer<input id="oc-name" list="cl-names" autocomplete="off" value="${esc(draft.cust)}" oninput="onDraftCustomerInput('name',this.value)"></label>
   <label>Customer email<input id="oc-email" type="email" list="cl-emails" autocomplete="off" value="${esc(draft.email)}" oninput="onDraftCustomerInput('email',this.value)" style="width:220px"></label>
   <label>Date<input id="oc-date" type="date" value="${draft.date}" oninput="ui.draft.date=this.value"></label>
@@ -75,12 +222,14 @@ function newOrderCard() {
   <button class="btn alt"${inStock.length ? '' : ' disabled'}>Add item</button></form>
   ${itemTable}
   <p id="dsum" aria-live="polite">${summary}</p>
-  <button class="btn" id="save-order" onclick="saveOrder()"${draft.items.length ? '' : ' disabled'}>Save order</button>`);
+  <div class="row"><button class="btn" id="save-order" onclick="saveOrder()"${none}>Save order</button><button class="btn alt" id="save-quote" onclick="saveQuote()"${none}>Save as quote</button></div>
+  <p class="empty">An order takes the items out of stock straight away. A quote doesn't touch stock until you turn it into an order.</p>`);
 }
 
 function draftSummary() {
   const revenue = orderRevenue(ui.draft), profit = orderProfit(ui.draft);
-  return `Total ${money(revenue)} · profit ${money(profit)} · margin ${percent(profit, revenue)}`;
+  const charged = orderTotals({ items: ui.draft.items, tax: currentTax(db) });
+  return `Total ${money(revenue)}${charged.total !== revenue ? ' + tax = ' + money(charged.total) : ''} · profit ${money(profit)} · margin ${percent(profit, revenue)}`;
 }
 
 // Typing updates the summary line in place so the fee box keeps focus.
@@ -114,17 +263,20 @@ function removeDraftItem(index) {
 }
 
 function saveOrder() {
-  const draft = ui.draft;
-  if (!draft.items.length) return showError('Add at least one item.', '#ol-prod');
-  takeStock(db.products, draft.items);
-  const no = nextOrderNumber(db.orders);
-  db.orders.push({
-    id: newId(), no, date: draft.date || today(), cust: draft.cust, email: draft.email,
-    invoiceNo: null, fee: +draft.fee || 0, status: 'Pending', items: draft.items
-  });
+  if (!ui.draft.items.length) return showError('Add at least one item.', '#ol-prod');
+  const order = createOrder(db, ui.draft, today());
   ui.draft = emptyDraftOrder();
   save();
-  showMessage('Order #' + no + ' saved and stock updated.', '#oc-name');
+  showMessage('Order #' + order.no + ' saved and stock updated.', '#oc-name');
+}
+
+function saveQuote() {
+  if (!ui.draft.items.length) return showError('Add at least one item.', '#ol-prod');
+  const quote = createQuote(db, ui.draft, today());
+  ui.draft = emptyDraftOrder();
+  ui.ordersView = 'quotes';
+  save();
+  showMessage('Quote ' + quote.no + ' saved. It is valid until ' + quote.validUntil + '.', `[data-focus="send-${quote.id}"]`);
 }
 
 // ---- customer autocomplete ----
@@ -134,7 +286,8 @@ function customerHint() {
   if (!cust.trim() && !email.trim()) return '';
   const c = matchCustomer(customers(), cust, email);
   if (!c) return 'New customer.';
-  return 'Existing customer: ' + c.orderCount + ' order' + (c.orderCount === 1 ? '' : 's') + ', last on ' + c.lastOrder + '.';
+  return 'Existing customer: ' + c.orderCount + ' order' + (c.orderCount === 1 ? '' : 's') + ', last on ' + c.lastOrder + '.'
+    + (c.awaitingPayment ? ' Owes ' + money(c.awaitingPayment) + '.' : '');
 }
 
 // which: 'name' | 'email'. When the typed value matches exactly one known customer, fill in the
@@ -154,52 +307,75 @@ function onDraftCustomerInput(which, value) {
   $('#oc-hint').textContent = customerHint();
 }
 
-// ---- invoices ----
+// ---- quotes ----
 
-function openInvoice(id) {
-  ui.invoiceOrderId = id;
-  ui.afterRender = { focus: '#iv-to', scroll: '#invoice-panel' }; // the panel is at the top, the button may be far below
-  render();
+const QUOTE_TONES = { Open: 'warn', Accepted: 'good', Declined: '', Expired: 'bad' };
+
+function quotesCard() {
+  if (!db.quotes.length) {
+    return card('Quotes', emptyNote('No quotes yet. Build one in the order form and choose "Save as quote".')
+      + `<div class="row"><button class="btn" onclick="setOrdersView('orders')">New quote</button></div>`);
+  }
+  const rows = db.quotes.slice().reverse().map(q => {
+    const status = quoteStatus(q, today()), open = q.status === 'Open';
+    const order = q.orderId && findOrder(q.orderId);
+    return `<tr><td>${esc(q.no)}</td><td>${q.date}</td><td>${q.validUntil}</td><td>${esc(q.cust || '–')}</td>
+    <td class="items" title="${esc(itemSummary(q))}">${esc(itemSummary(q))}</td><td class="n">${money(orderTotals(q).total)}</td>
+    <td>${tag(status, QUOTE_TONES[status])}${order ? ' order #' + order.no : ''}</td>
+    <td><button class="btn alt sm" data-focus="send-${q.id}" onclick="sendQuote(${q.id})">Send…</button>
+    ${open ? `<button class="btn sm" data-focus="accept-${q.id}" onclick="acceptQuote(${q.id})">Make order</button> <button class="btn alt sm" onclick="declineQuote(${q.id})">Declined</button>` : ''}
+    ${deleteButton('q' + q.id, 'quote ' + q.no, `deleteQuote(${q.id})`)}</td></tr>`;
+  }).join('');
+  return card('Quotes', table([th('No.'), th('Date'), th('Valid until'), th('Customer'), th('Items'), thNum('Total'), th('Status'), th('')], rows)
+    + `<p class="empty">"Make order" turns the quote into an order at the quoted prices and takes the stock. Quotes are valid for ${QUOTE_VALID_DAYS} days.</p>
+    <div class="row"><button class="btn alt" onclick="setOrdersView('orders')">New quote</button></div>`);
 }
 
-function closeInvoice() {
-  const id = ui.invoiceOrderId;
-  ui.invoiceOrderId = null;
-  ui.afterRender = { focus: `[data-focus="inv-${id}"]` };
-  render();
+const findQuote = id => db.quotes.find(q => q.id === id);
+
+function sendQuote(id) {
+  const q = findQuote(id);
+  openSend({
+    title: 'Quote ' + q.no, to: q.email, returnFocus: `[data-focus="send-${id}"]`,
+    message: 'Hi ' + (q.cust || 'there') + ',\n\nThank you for your enquiry. Your quote is attached and is valid until ' + q.validUntil + '.' + signOff(),
+    prepare(to) {
+      if (to && !q.email) { q.email = to; save(); }
+      return { doc: quoteDoc(db, q), filename: 'Quote ' + q.no, subject: 'Quote ' + q.no + ' from ' + db.biz.name };
+    }
+  });
 }
 
-function invoicePanel() {
-  const o = ui.invoiceOrderId && findOrder(ui.invoiceOrderId);
-  if (!o) return '';
-  const defaultMessage = 'Hi ' + (o.cust || 'there') + ',\n\nPlease find your invoice attached.\n\nKind regards,\n' + db.biz.name;
-  const missingBusiness = db.biz.name.trim() ? ''
-    : `<div class="msg warnbar">Add your business name in Settings before creating invoices. <button type="button" class="btn sm" onclick="goTo('set')">Open settings</button></div>`;
-  return card(`Invoice for order #${o.no}${o.invoiceNo ? ' (' + esc(o.invoiceNo) + ')' : ''}`, `${missingBusiness}
-  <div class="row"><label>Send to<input id="iv-to" type="email" value="${esc(o.email || '')}" style="width:260px"></label>
-  <label>Subject<input id="iv-sub" placeholder="Invoice number and your business name" style="width:300px"></label></div>
-  <label style="display:block;margin:8px 0;color:var(--mute);font-size:13px">Message<textarea id="iv-msg">${esc(defaultMessage)}</textarea></label>
-  <div class="row"><button class="btn" onclick="sendInvoice('email',this)">Email invoice</button><button class="btn alt" onclick="sendInvoice('save',this)">Save as PDF</button><button class="btn alt" onclick="closeInvoice()">Close</button></div>
-  <p class="empty">The invoice number is assigned the first time you save or email it and never changes. Press Esc to close.</p>`, 'invoice-panel');
-}
-
-// mode: 'email' | 'save' (PDF). The invoice number is assigned on first use and then fixed.
-async function sendInvoice(mode, button) {
-  const o = findOrder(ui.invoiceOrderId);
-  if (!o) return;
-  if (!db.biz.name.trim()) return showError('Add your business name in Settings first.');
-  const to = $('#iv-to').value.trim();
-  if (mode === 'email' && !/^\S+@\S+\.\S+$/.test(to)) return showError('Enter a valid email address to send to.', '#iv-to');
-  const subject = $('#iv-sub').value.trim(), message = $('#iv-msg').value;
-  o.email = to;
-  if (!o.invoiceNo) o.invoiceNo = (db.biz.prefix || 'INV-') + String(db.nextInvoice++).padStart(4, '0');
+function acceptQuote(id) {
+  const result = convertQuote(db, findQuote(id), today());
+  if (result.error) return showError(result.error);
   save();
-  const result = await whileBusy(button, mode === 'email' ? 'Sending…' : 'Saving…', () => window.api.invoice({
-    order: o, biz: db.biz, cur: db.cur, mode, to,
-    subject: subject || ('Invoice ' + o.invoiceNo + ' from ' + db.biz.name), message
-  }));
-  if (!result) return;
-  if (result.ok) { ui.invoiceOrderId = null; showMessage(result.msg); }
-  else if (result.msg === 'Save cancelled.') toast(result.msg, false);
-  else showError(result.msg); // no redraw, so the message the user wrote is kept for another try
+  ui.ordersView = 'orders';
+  ui.openOrderId = result.order.id;
+  ui.afterRender = { scroll: '#order-panel' };
+  showMessage('Order #' + result.order.no + ' created from the quote and stock updated.', '#order-panel-close');
+}
+
+function declineQuote(id) {
+  findQuote(id).status = 'Declined';
+  save();
+  render();
+}
+
+function deleteQuote(id) {
+  if (!confirmed('q' + id)) return;
+  db.quotes = db.quotes.filter(q => q.id !== id);
+  save();
+  showMessage('Quote deleted.');
+}
+
+// ---- all credit notes ----
+
+function creditsCard() {
+  if (!db.credits.length) return card('Credit notes', emptyNote('No credit notes yet. To issue one, open the order it relates to and choose "New credit note".'));
+  const rows = db.credits.slice().reverse().map(c => `<tr><td>${esc(c.no)}</td><td>${c.date}</td><td>#${c.orderNo}</td><td>${esc(c.cust || '–')}</td>
+  <td class="items" title="${esc(itemSummary(c))}">${esc(itemSummary(c))}</td><td class="n">${money(orderTotals(c).total)}</td>
+  <td>${c.restock ? 'Returned to stock' : 'Not returned'}</td><td class="items" title="${esc(c.reason)}">${esc(c.reason || '–')}</td>
+  <td><button class="btn alt sm" data-focus="send-${c.id}" onclick="sendCredit(${c.id})">Send…</button></td></tr>`).join('');
+  return card('Credit notes', table([th('No.'), th('Date'), th('Order'), th('Customer'), th('Items'), thNum('Amount'), th('Stock'), th('Reason'), th('')], rows)
+    + '<p class="empty">A credit note takes money off an order and off your sales for the day it was issued. To issue one, open the order on the Orders view.</p>');
 }

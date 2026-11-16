@@ -10,6 +10,7 @@ function dashboardScreen() {
   const orderCount = s.orders.length;
   const stockAtCost = sumOf(db.products, p => p.stock * p.cost);
   const stockAtRetail = sumOf(db.products, p => p.stock * p.price);
+  const owed = sumOf(customers(), c => c.awaitingPayment);
   return `<div class="row" style="margin-bottom:12px"><label>Period<select id="period" onchange="setPeriod(this.value)">${options(PERIODS, ui.period)}</select></label></div>
   <div class="grid">
   ${stat('Revenue', money(s.revenue))}
@@ -19,12 +20,13 @@ function dashboardScreen() {
   ${stat('Expenses', money(s.expenses))}
   ${stat('Net profit · margin ' + percent(s.netProfit, s.revenue), money(s.netProfit), { tile: 'net', valueClass: signClass(s.netProfit) })}
   ${stat('Orders · average value', orderCount + ' · ' + money(orderCount ? s.revenue / orderCount : 0))}
-  ${stat('Stock value (cost → retail)', money(stockAtCost), { note: money(stockAtRetail) + ' at retail' })}</div>
-  ${trendCard(s.orders)}
-  <div class="two">${productProfitCard(s.orders)}
+  ${stat('Stock value (cost → retail)', money(stockAtCost), { note: money(stockAtRetail) + ' at retail' })}
+  ${stat('Owed to you by customers', money(owed), { note: 'all unpaid orders, any date' })}</div>
+  ${trendCard(s.entries)}
+  <div class="two">${productProfitCard(s.entries)}
   ${card('Orders by status', statusDonut(db.orders.filter(o => isInPeriod(o.date, ui.period))))}</div>
   ${restockCard()}
-  ${topProductsCard(s.orders)}`;
+  ${topProductsCard(s.entries)}`;
 }
 
 function restockCard() {

@@ -1,7 +1,7 @@
 // Data layer: no Electron code in here, so it can be tested on its own.
 const fs = require('fs'), path = require('path');
 
-const SCHEMA = 2;
+const SCHEMA = 3;
 // When the data shape changes: bump SCHEMA and add one function here.
 // Key = the version it upgrades TO. Never edit an old migration after release.
 // Example:  3: d => { d.products.forEach(p => p.supplier = ''); return d; }
@@ -10,6 +10,21 @@ const MIGRATIONS = {
     d.biz = { name: '', address: '', email: '', phone: '', taxId: '', taxRate: 0, taxIncl: false, prefix: 'INV-', bank: '', footer: 'Thank you for your business.' };
     d.nextInvoice = 1;
     d.orders.forEach(o => { o.email = o.email || ''; o.invoiceNo = o.invoiceNo || null; });
+    return d;
+  },
+  3: d => { // v2.0: payments, quotes, credit notes, suppliers, purchase orders, stock history
+    const tax = { rate: +d.biz.taxRate || 0, incl: !!d.biz.taxIncl };
+    d.orders.forEach(o => {
+      o.tax = { ...tax }; // from now on each order remembers the tax rules it was made under
+      // Until now "paid" was only a status. Orders at Paid or beyond count as paid in full on their own date.
+      const sub = o.items.reduce((a, i) => a + i.q * i.p, 0);
+      const total = Math.round((tax.rate > 0 && !tax.incl ? sub * (1 + tax.rate / 100) : sub) * 100) / 100;
+      const paid = ['Paid', 'Shipped', 'Completed'].includes(o.status) && total > 0;
+      o.payments = paid ? [{ id: d.n++, date: o.date, amt: total, method: '', note: 'Paid before payments were tracked' }] : [];
+    });
+    d.expenses.forEach(e => { e.cat = e.cat || ''; });
+    d.quotes = []; d.credits = []; d.suppliers = []; d.purchases = []; d.moves = [];
+    d.nextQuote = 1; d.nextCredit = 1; d.nextPurchase = 1;
     return d;
   }
 };

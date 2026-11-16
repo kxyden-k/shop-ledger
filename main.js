@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, net, powerMonitor, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, net, powerMonitor, safeStorage, clipboard } = require('electron');
 const path = require('path'), fs = require('fs');
+const { execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { createStore, migrate } = require('./db');
 const backup = require('./backup');
-const { invoiceHtml } = require('./invoice');
+const { documentHtml, toCsv } = require('./pdf-template');
 const createMail = require('./mail');
 const sec = require('./security');
 const CFG = require('./access.config.json');
@@ -71,12 +72,21 @@ async function refresh() {
   if (S.mode !== was) show();
 }
 
-async function makePdf(html) {
+const safeName = s => String(s).replace(/[\\/:*?"<>|]/g, '-').slice(0, 120);
+
+// Renders the page in a hidden window with scripts off. It goes through a temporary file
+// because a long report does not fit in a data: address.
+async function makePdf(html, landscape) {
   const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, contextIsolation: true } });
+  const file = path.join(app.getPath('temp'), 'shop-ledger-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.html');
   try {
-    await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    return await w.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } });
-  } finally { w.destroy(); }
+    fs.writeFileSync(file, html);
+    await w.loadFile(file);
+    return await w.webContents.printToPDF({ pageSize: 'A4', landscape: !!landscape, printBackground: true, margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } });
+  } finally {
+    w.destroy();
+    try { fs.unlinkSync(file); } catch (e) { /* already gone */ }
+  }
 }
 
 // ---- off-computer backups ----
@@ -128,20 +138,31 @@ function register() {
       return { ok: true, msg: 'Test email sent to ' + to + '.' };
     } catch (err) { log('test mail failed ' + err.message); return { ok: false, msg: 'Email failed: ' + err.message }; }
   });
-  call('invoice:run', async (e, a) => {
+  // Any document (invoice, quote, credit note, purchase order, statement, report) as a PDF: saved or emailed.
+  call('doc:run', async (e, a) => {
     try {
-      const o = a.order, name = ('Invoice ' + o.invoiceNo + '.pdf').replace(/[\\/:*?"<>|]/g, '-');
-      const pdf = await makePdf(invoiceHtml(o, a.biz, a.cur));
+      const label = String(a.filename || 'Document'), name = safeName(label) + '.pdf';
+      const pdf = await makePdf(documentHtml(a.doc, a.biz), a.doc && a.doc.wide);
       if (a.mode === 'save') {
         const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('documents'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
         if (r.canceled) return { ok: false, msg: 'Save cancelled.' };
         fs.writeFileSync(r.filePath, pdf); shell.showItemInFolder(r.filePath);
         return { ok: true, msg: 'Saved ' + path.basename(r.filePath) + '.' };
       }
-      await mail.send({ to: a.to, subject: a.subject, text: a.message, filename: name, pdf });
-      return { ok: true, msg: 'Invoice ' + o.invoiceNo + ' emailed to ' + a.to + '.' };
-    } catch (err) { log('invoice failed ' + err.message); return { ok: false, msg: 'Invoice failed: ' + err.message }; }
+      try { await mail.send({ to: a.to, subject: a.subject, text: a.message, filename: name, pdf }); }
+      catch (err) { log('email failed ' + err.message); return { ok: false, msg: 'Could not email it: ' + err.message }; }
+      return { ok: true, msg: label + ' emailed to ' + a.to + '.' };
+    } catch (err) { log('document failed ' + err.message); return { ok: false, msg: 'Could not create the document: ' + err.message }; }
   });
+  call('export:csv', async (e, a) => {
+    try {
+      const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('documents'), safeName(a.filename || 'Export') + '.csv'), filters: [{ name: 'Spreadsheet (CSV)', extensions: ['csv'] }] });
+      if (r.canceled) return { ok: false, msg: 'Save cancelled.' };
+      fs.writeFileSync(r.filePath, toCsv(a.rows)); shell.showItemInFolder(r.filePath);
+      return { ok: true, msg: 'Saved ' + path.basename(r.filePath) + '.' };
+    } catch (err) { log('export failed ' + err.message); return { ok: false, msg: 'Export failed: ' + err.message }; }
+  });
+  send('clip:copy', (e, text) => clipboard.writeText(String(text || '')));
   // backups
   sync('backup:get', () => { const c = bcfg(); return { folder: c.folder || '', folderOk, encrypt: !!c.encrypt, hasPass: !!c.pass, lastOk: c.lastOk || 0, lastError: c.lastError || '' }; });
   call('backup:folder', async () => {
@@ -223,6 +244,47 @@ function register() {
     if (String(pin).length < 4) return { ok: false, msg: 'Use at least 4 characters.' };
     jwrite('pin.json', sec.makePin(pin)); return { ok: true, msg: 'PIN lock is on.' };
   });
+  registerLicenceAdmin();
+}
+
+// The developer's own Licences screen: issue, list and revoke access tokens. It needs the private
+// key, so it only exists when running from source (npm start) on a machine that has keys/private.pem.
+// tools/ and keys/ are not in the installer, and a packaged app never reaches the require below.
+function registerLicenceAdmin() {
+  const admin = app.isPackaged ? null : (() => { try { return require('./tools/licence-admin').createAdmin(); } catch (e) { return null; } })();
+  const on = !!admin && admin.available();
+  sync('lic:available', () => on);
+  if (!on) return;
+  const git = (...args) => new Promise(resolve => execFile('git', args, { cwd: admin.root, timeout: 30000 }, (err, out, errOut) => resolve({ err, out: String(out || ''), errOut: String(errOut || '') })));
+  // True while access/revoked.json has changes that customers' apps can't see yet.
+  const unpublished = async () => {
+    const changed = await git('status', '--porcelain', '--', 'access/revoked.json');
+    if (changed.out.trim()) return true;
+    const ahead = await git('log', '--oneline', '@{u}..HEAD', '--', 'access/revoked.json');
+    return !!ahead.out.trim();
+  };
+  const guard = fn => async (e, a) => { try { return await fn(a || {}); } catch (err) { log('licence admin failed ' + err.message); return { ok: false, msg: err.message }; } };
+  call('lic:list', guard(async () => ({ ok: true, tokens: admin.list(), unpublished: await unpublished() })));
+  call('lic:issue', guard(a => {
+    const r = admin.issue(a.name, a.days);
+    return { ok: true, msg: 'Token issued for ' + r.payload.name + '.', token: r.token, id: r.payload.id };
+  }));
+  call('lic:revoke', guard(a => {
+    admin.setRevoked(a.id, a.revoked);
+    return { ok: true, msg: (a.revoked ? 'Revoked ' : 'Restored ') + a.id + '. Publish the list to make it take effect.' };
+  }));
+  call('lic:publish', guard(async () => {
+    if (!(await unpublished())) return { ok: true, msg: 'The revoked list is already published.' };
+    await git('add', '--', 'access/revoked.json');
+    const staged = await git('diff', '--cached', '--quiet', '--', 'access/revoked.json');
+    if (staged.err) {
+      const commit = await git('commit', '-m', 'Update revoked licences', '--', 'access/revoked.json');
+      if (commit.err) throw new Error('Could not commit: ' + (commit.errOut || commit.err.message).trim());
+    }
+    const push = await git('push');
+    if (push.err) throw new Error('Committed, but the push failed: ' + (push.errOut || push.err.message).trim());
+    return { ok: true, msg: 'Published. Apps pick it up at their next check (start-up and every 6 hours).' };
+  }));
 }
 
 function start() {

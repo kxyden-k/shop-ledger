@@ -5,7 +5,9 @@ contextBridge.exposeInMainWorld('api', {
   info: () => ipcRenderer.sendSync('app:info'),
   openData: () => ipcRenderer.send('app:open-data'),
   checkUpdate: () => ipcRenderer.invoke('update:check'),
-  invoice: a => ipcRenderer.invoke('invoice:run', a),
+  document: a => ipcRenderer.invoke('doc:run', a),
+  exportCsv: a => ipcRenderer.invoke('export:csv', a),
+  copyText: t => ipcRenderer.send('clip:copy', t),
   mailGet: () => ipcRenderer.sendSync('mail:get'),
   mailSet: c => ipcRenderer.invoke('mail:set', c),
   mailTest: () => ipcRenderer.invoke('mail:test'),
@@ -21,5 +23,12 @@ contextBridge.exposeInMainWorld('api', {
   backupSettings: a => ipcRenderer.invoke('backup:settings', a),
   backupNow: () => ipcRenderer.invoke('backup:now'),
   backupRestore: a => ipcRenderer.invoke('backup:restore', a),
-  lock: () => ipcRenderer.send('pin:lock')
+  lock: () => ipcRenderer.send('pin:lock'),
+  licences: {
+    available: () => ipcRenderer.sendSync('lic:available'),
+    list: () => ipcRenderer.invoke('lic:list'),
+    issue: a => ipcRenderer.invoke('lic:issue', a),
+    revoke: a => ipcRenderer.invoke('lic:revoke', a),
+    publish: () => ipcRenderer.invoke('lic:publish')
+  }
 });
