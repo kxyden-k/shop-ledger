@@ -8,11 +8,11 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Require access public key
         shell: pwsh
         run: if (-not (Test-Path access/public.pem)) { throw 'Missing access/public.pem. Run node tools/keygen.js and commit access/public.pem.' }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm test

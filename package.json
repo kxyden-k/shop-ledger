@@ -1,10 +1,10 @@
 {
   "name": "shop-ledger",
   "productName": "Shop Ledger",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Orders, stock, pricing and profit tracker",
   "main": "main.js",
-  "author": "Your Name",
+  "author": "Kayden",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -40,8 +40,9 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "YOUR_GITHUB_USER",
-      "repo": "shop-ledger"
+      "owner": "kxyden-k",
+      "repo": "shop-ledger",
+      "releaseType": "release"
     }
   },
   "dependencies": {

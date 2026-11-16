@@ -1,5 +1,5 @@
 {
-  "revocationUrl": "https://raw.githubusercontent.com/YOUR_GITHUB_USER/shop-ledger/main/access/revoked.json",
+  "revocationUrl": "https://raw.githubusercontent.com/kxyden-k/shop-ledger/main/access/revoked.json",
   "graceDays": 14,
   "idleMinutes": 15,
   "contact": "Please contact your supplier."
