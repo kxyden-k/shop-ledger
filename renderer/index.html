@@ -50,11 +50,12 @@ textarea{width:100%;height:120px;font:12px monospace}
 .hb{display:grid;grid-template-columns:minmax(80px,150px) 1fr 100px;gap:8px;align-items:center;margin:6px 0}
 .hb span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hb div{background:var(--bg);border-radius:3px;height:14px}.hb b{display:block;height:14px;border-radius:3px}.hb em{font-style:normal;text-align:right}
 .warnbar{border-left-color:var(--bad)}
+.badge{background:var(--bad);color:#fff;border-radius:9px;padding:0 6px;font-size:12px}
 </style>
 </head>
 <body>
 <header>
-<h1>Shop Ledger</h1>
+<h1>Shop Ledger</h1><small id="ver" style="color:var(--mute)"></small>
 <nav id="nav"></nav>
 </header>
 <main id="app"></main>
@@ -435,8 +436,9 @@ function wipe(){
 }
 
 function render(){
-  $('#nav').innerHTML = Object.entries(TABS).map(([k, v]) => `<button class="${tab === k ? 'on' : ''}" onclick="go('${k}')">${v}</button>`).join('');
-  const body = {dash, prod, ord, cust, exp:exps, set:sett}[tab]();
+  const low = db.products.filter(p => p.stock <= p.reorder).length;
+  $('#ver').textContent = 'v' + window.api.info().version;
+  $('#nav').innerHTML = Object.entries(TABS).map(([k, v]) => `<button class="${tab === k ? 'on' : ''}" onclick="go('${k}')">${v}${k === 'prod' && low ? ' <span class="badge">' + low + '</span>' : ''}</button>`).join('');  const body = {dash, prod, ord, cust, exp:exps, set:sett}[tab]();
   $('#app').innerHTML = bkBanner() + (msg ? `<div class="msg">${esc(msg)}</div>` : '') + body; msg = '';
 }
 render();
