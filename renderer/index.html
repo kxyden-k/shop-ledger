@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shop Ledger</title>
+<style>
+:root{--bg:#f3f1ec;--panel:#fff;--ink:#1d2a2e;--mute:#667478;--line:#d9d5ca;--acc:#1f5f5b;--acc-ink:#fff;--good:#1d7a46;--bad:#b3362b;--warn:#fbeed0;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141b1d;--panel:#1c2629;--ink:#e6ecec;--mute:#8d9fa3;--line:#2e3b3f;--acc:#5fb3ac;--acc-ink:#0d1516;--good:#4cc287;--bad:#ef7a6e;--warn:#3a3217;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141b1d;--panel:#1c2629;--ink:#e6ecec;--mute:#8d9fa3;--line:#2e3b3f;--acc:#5fb3ac;--acc-ink:#0d1516;--good:#4cc287;--bad:#ef7a6e;--warn:#3a3217;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;padding:14px 20px;border-bottom:2px solid var(--ink)}
+h1{margin:0;font:700 22px Georgia,"Times New Roman",serif;letter-spacing:.2px}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;border-bottom:3px solid transparent;color:var(--mute);padding:6px 10px;font:inherit;cursor:pointer}
+nav button.on{color:var(--ink);border-color:var(--acc);font-weight:600}
+main{padding:20px;max-width:1150px;margin:0 auto}
+h2{font:700 18px Georgia,serif;margin:0 0 10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px}
+.stat small{color:var(--mute);display:block}
+.stat b{font:700 22px Georgia,serif}
+.stat.net{border:2px solid var(--acc)}
+.pos{color:var(--good)}.neg{color:var(--bad)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--mute);font-weight:600;font-size:13px}
+td.n,th.n{text-align:right}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px 8px;max-width:100%}
+td input{width:84px;text-align:right}
+td input.t{width:140px;text-align:left}
+input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.row label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:2px}
+.btn{background:var(--acc);color:var(--acc-ink);border:0;border-radius:4px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer}
+.btn.alt{background:none;color:var(--ink);border:1px solid var(--line)}
+.btn.del{background:none;color:var(--bad);border:1px solid var(--bad)}
+.btn.sm{padding:3px 9px;font-size:13px}
+.low{background:var(--warn)}
+.msg{background:var(--warn);border-left:4px solid var(--acc);padding:8px 12px;margin-bottom:14px}
+.empty{color:var(--mute);padding:10px 0}
+textarea{width:100%;height:120px;font:12px monospace}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.legend{color:var(--mute);font-size:13px}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 5px 0 14px}.legend i:first-child{margin-left:0}
+.hb{display:grid;grid-template-columns:minmax(80px,150px) 1fr 100px;gap:8px;align-items:center;margin:6px 0}
+.hb span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hb div{background:var(--bg);border-radius:3px;height:14px}.hb b{display:block;height:14px;border-radius:3px}.hb em{font-style:normal;text-align:right}
+.warnbar{border-left-color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+<h1>Shop Ledger</h1>
+<nav id="nav"></nav>
+</header>
+<main id="app"></main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today = () => new Date().toISOString().slice(0,10);
+function load(){ return window.api.load(); }
+let db = load();
+function save(){ window.api.save(db); }
+const uid = () => db.n++;
+const money = v => (v < 0 ? '−' : '') + db.cur + Math.abs(+v || 0).toLocaleString('en', {minimumFractionDigits:2, maximumFractionDigits:2});
+const pct = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '–';
+const P = id => db.products.find(p => p.id === id);
+const oRev = o => o.items.reduce((a, i) => a + i.q * i.p, 0);
+const oCost = o => o.items.reduce((a, i) => a + i.q * i.c, 0);
+const oProfit = o => oRev(o) - oCost(o) - (+o.fee || 0);
+let tab = 'dash', range = 'all', armed = null, msg = '', inv = null;
+let draft = {cust:'', email:'', date:today(), fee:0, items:[]};
+const TABS = {dash:'Dashboard', prod:'Products & stock', ord:'Orders', cust:'Customers', exp:'Expenses', set:'Settings'};
+const STAT = ['Pending','Paid','Shipped','Completed','Cancelled'];
+
+function inRange(d){
+  if (range === 'all') return true;
+  if (range === 'month') return d.slice(0,7) === today().slice(0,7);
+  return (Date.now() - new Date(d)) / 864e5 <= 30;
+}
+function go(t){ tab = t; armed = null; render(); }
+function say(m){ msg = m; render(); }
+
+function dash(){
+  const os = db.orders.filter(o => o.status !== 'Cancelled' && inRange(o.date));
+  const ex = db.expenses.filter(e => inRange(e.date));
+  const rev = os.reduce((a, o) => a + oRev(o), 0), cogs = os.reduce((a, o) => a + oCost(o), 0);
+  const fees = os.reduce((a, o) => a + (+o.fee || 0), 0), exp = ex.reduce((a, e) => a + e.amt, 0);
+  const gross = rev - cogs - fees, net = gross - exp;
+  const sv = db.products.reduce((a, p) => a + p.stock * p.cost, 0), rv = db.products.reduce((a, p) => a + p.stock * p.price, 0);
+  const low = db.products.filter(p => p.stock <= p.reorder);
+  const agg = {};
+  os.forEach(o => o.items.forEach(i => { const a = agg[i.n] = agg[i.n] || {q:0, pr:0}; a.q += i.q; a.pr += i.q * (i.p - i.c); }));
+  const top = Object.entries(agg).sort((a, b) => b[1].pr - a[1].pr).slice(0, 5);
+  return `<div class="row" style="margin-bottom:12px"><label>Period<select onchange="range=this.value;render()">
+  ${[['all','All time'],['month','This month'],['30d','Last 30 days']].map(r => `<option value="${r[0]}" ${range === r[0] ? 'selected' : ''}>${r[1]}</option>`).join('')}</select></label></div>
+  <div class="grid">
+  <div class="stat"><small>Revenue</small><b>${money(rev)}</b></div>
+  <div class="stat"><small>Cost of goods</small><b>${money(cogs)}</b></div>
+  <div class="stat"><small>Order fees (shipping etc.)</small><b>${money(fees)}</b></div>
+  <div class="stat"><small>Gross profit · margin ${pct(gross, rev)}</small><b class="${gross < 0 ? 'neg' : 'pos'}">${money(gross)}</b></div>
+  <div class="stat"><small>Expenses</small><b>${money(exp)}</b></div>
+  <div class="stat net"><small>Net profit · margin ${pct(net, rev)}</small><b class="${net < 0 ? 'neg' : 'pos'}">${money(net)}</b></div>
+  <div class="stat"><small>Orders · average value</small><b>${os.length} · ${money(os.length ? rev / os.length : 0)}</b></div>
+  <div class="stat"><small>Stock value (cost → retail)</small><b>${money(sv)}</b><small>${money(rv)} at retail</small></div></div>
+  ${charts(os)}<div class="card"><h2>Needs restocking</h2>${low.length ? `<div class="scroll"><table><tr><th>Product</th><th class="n">In stock</th><th class="n">Reorder at</th></tr>${low.map(p => `<tr><td>${esc(p.name)}</td><td class="n neg">${p.stock}</td><td class="n">${p.reorder}</td></tr>`).join('')}</table></div>` : '<div class="empty">Nothing is below its reorder level.</div>'}</div>
+  <div class="card"><h2>Top products by profit</h2>${top.length ? `<div class="scroll"><table><tr><th>Product</th><th class="n">Units sold</th><th class="n">Profit</th></tr>${top.map(t => `<tr><td>${esc(t[0])}</td><td class="n">${t[1].q}</td><td class="n">${money(t[1].pr)}</td></tr>`).join('')}</table></div>` : '<div class="empty">Add products and orders to see what earns the most.</div>'}</div>`;
+}
+
+function prod(){
+  const rows = db.products.map(p => {
+    const m = p.price - p.cost, mp = p.price ? m / p.price * 100 : 0;
+    const hist = (p.h || []).map(h => h.d + ': ' + db.cur + h.o).join('\n');
+    return `<tr class="${p.stock <= p.reorder ? 'low' : ''}">
+    <td><input class="t" value="${esc(p.sku)}" style="width:80px" onchange="upd(${p.id},'sku',this.value,1)"></td>
+    <td><input class="t" value="${esc(p.name)}" onchange="upd(${p.id},'name',this.value,1)"></td>
+    <td class="n"><input type="number" step="0.01" min="0" value="${p.cost}" onchange="upd(${p.id},'cost',this.value)"></td>
+    <td class="n"><input type="number" step="0.01" min="0" value="${p.price}" title="${esc(hist || 'No price changes yet')}" onchange="upd(${p.id},'price',this.value)"></td>
+    <td class="n ${m < 0 ? 'neg' : ''}">${money(m)}</td>
+    <td class="n ${mp < 10 ? 'neg' : 'pos'}">${mp.toFixed(1)}%</td>
+    <td class="n">${p.cost ? (m / p.cost * 100).toFixed(0) + '%' : '–'}</td>
+    <td class="n"><input type="number" step="1" value="${p.stock}" onchange="upd(${p.id},'stock',this.value)"></td>
+    <td class="n"><input type="number" step="1" min="0" value="${p.reorder}" onchange="upd(${p.id},'reorder',this.value)"></td>
+    <td class="n">${money(p.stock * p.cost)}</td>
+    <td><button class="btn del sm" onclick="delProd(${p.id})">${armed === 'p' + p.id ? 'Confirm' : 'Delete'}</button></td></tr>`;
+  }).join('');
+  return `<div class="card"><h2>Add a product</h2><div class="row">
+  <label>SKU<input id="f-sku" style="width:90px"></label><label>Name<input id="f-name"></label>
+  <label>Cost<input id="f-cost" type="number" step="0.01" min="0" style="width:90px"></label>
+  <label>Selling price<input id="f-price" type="number" step="0.01" min="0" style="width:100px"></label>
+  <label>Stock<input id="f-stock" type="number" min="0" style="width:80px"></label>
+  <label>Reorder at<input id="f-re" type="number" min="0" style="width:80px"></label>
+  <button class="btn" onclick="addProd()">Add product</button></div></div>
+  <div class="card"><h2>Change all prices</h2><div class="row">
+  <label>Change by %<input id="bulk" type="number" step="0.1" placeholder="e.g. 5 or -10" style="width:130px"></label>
+  <button class="btn alt" onclick="bulk()">Apply to every product</button></div></div>
+  <div class="card"><h2>Products (edit any cell, changes save instantly)</h2>
+  ${rows ? `<div class="scroll"><table><tr><th>SKU</th><th>Name</th><th class="n">Cost</th><th class="n">Price</th><th class="n">Profit/unit</th><th class="n">Margin</th><th class="n">Markup</th><th class="n">Stock</th><th class="n">Reorder at</th><th class="n">Stock value</th><th></th></tr>${rows}</table></div><p class="empty">Shaded rows are at or below their reorder level. Hover a price to see its past values.</p>` : '<div class="empty">No products yet. Add your first one above.</div>'}</div>`;
+}
+function addProd(){
+  const g = i => $('#f-' + i).value, name = g('name').trim();
+  if (!name) return say('Enter a product name.');
+  db.products.push({id:uid(), sku:g('sku').trim(), name, cost:+g('cost') || 0, price:+g('price') || 0, stock:+g('stock') || 0, reorder:+g('re') || 0, h:[]});
+  save(); say('Added ' + name + '.');
+}
+function upd(id, f, v, txt){
+  const p = P(id); if (!p) return;
+  if (!txt) { v = +v; if (isNaN(v)) return render(); if (f === 'price' && v !== p.price) (p.h = p.h || []).push({d:today(), o:p.price}); }
+  p[f] = v; save(); render();
+}
+function bulk(){
+  const v = +$('#bulk').value; if (!v) return say('Enter a percentage first.');
+  db.products.forEach(p => { p.h = p.h || []; p.h.push({d:today(), o:p.price}); p.price = Math.round(p.price * (1 + v / 100) * 100) / 100; });
+  save(); say('All prices changed by ' + v + '%.');
+}
+function delProd(id){
+  if (armed !== 'p' + id) { armed = 'p' + id; return render(); }
+  db.products = db.products.filter(p => p.id !== id); armed = null; save(); render();
+}
+
+function ord(){
+  const avail = db.products.filter(p => p.stock > 0);
+  const dr = draft.items, dRev = dr.reduce((a, i) => a + i.q * i.p, 0), dCost = dr.reduce((a, i) => a + i.q * i.c, 0);
+  const rows = db.orders.slice().reverse().map(o => `<tr class="${o.status === 'Cancelled' ? 'low' : ''}">
+  <td>#${o.no}</td><td>${o.date}</td><td>${esc(o.cust || '–')}</td>
+  <td title="${esc(o.items.map(i => i.q + ' × ' + i.n).join(', '))}">${o.items.reduce((a, i) => a + i.q, 0)} items</td>
+  <td class="n">${money(oRev(o))}</td><td class="n">${money(oCost(o) + (+o.fee || 0))}</td>
+  <td class="n ${oProfit(o) < 0 ? 'neg' : 'pos'}">${money(oProfit(o))}</td><td class="n">${pct(oProfit(o), oRev(o))}</td>
+  <td><select onchange="setStatus(${o.id},this.value)">${STAT.map(s => `<option ${o.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></td><td>${o.invoiceNo ? esc(o.invoiceNo) + ' ' : ''}${o.status === 'Cancelled' ? '' : `<button class="btn alt sm" onclick="inv=${o.id};render()">Invoice</button>`}</td></tr>`).join('');
+  return invPanel() + `<div class="card"><h2>New order</h2><div class="row">
+  <label>Customer<input value="${esc(draft.cust)}" oninput="draft.cust=this.value"></label>
+  <label>Customer email<input type="email" value="${esc(draft.email)}" oninput="draft.email=this.value" style="width:220px"></label>
+  <label>Date<input type="date" value="${draft.date}" oninput="draft.date=this.value"></label>
+  <label>Fees (shipping, platform)<input type="number" step="0.01" min="0" value="${draft.fee}" oninput="draft.fee=+this.value;sumDraft()" style="width:130px"></label></div>
+  <div class="row" style="margin-top:10px">
+  <label>Product<select id="ol-prod" onchange="const p=P(+this.value);$('#ol-price').value=p?p.price:''">${avail.map(p => `<option value="${p.id}">${esc(p.name)} (${p.stock} in stock)</option>`).join('')}</select></label>
+  <label>Qty<input id="ol-qty" type="number" min="1" value="1" style="width:70px"></label>
+  <label>Unit price<input id="ol-price" type="number" step="0.01" min="0" value="${avail[0] ? avail[0].price : ''}" style="width:100px"></label>
+  <button class="btn alt" onclick="addLine()">Add item</button></div>
+  ${dr.length ? `<div class="scroll" style="margin-top:10px"><table><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Cost</th><th></th></tr>${dr.map((i, k) => `<tr><td>${esc(i.n)}</td><td class="n">${i.q}</td><td class="n">${money(i.p)}</td><td class="n">${money(i.c)}</td><td><button class="btn del sm" onclick="draft.items.splice(${k},1);render()">Remove</button></td></tr>`).join('')}</table></div>` : ''}
+  <p id="dsum">${dr.length ? `Total ${money(dRev)} · profit ${money(dRev - dCost - (+draft.fee || 0))} · margin ${pct(dRev - dCost - (+draft.fee || 0), dRev)}` : (avail.length ? 'Add items to build the order.' : 'Add products with stock before creating an order.')}</p>
+  <button class="btn" onclick="saveOrder()">Save order</button></div>
+  <div class="card"><h2>Orders</h2>${rows ? `<div class="scroll"><table><tr><th>No.</th><th>Date</th><th>Customer</th><th>Items</th><th class="n">Revenue</th><th class="n">Costs</th><th class="n">Profit</th><th class="n">Margin</th><th>Status</th><th>Invoice</th></tr>${rows}</table></div><p class="empty">Stock is taken off when an order is saved and returned if it is cancelled.</p>` : '<div class="empty">No orders yet.</div>'}</div>`;
+}
+function sumDraft(){
+  const dr = draft.items, r = dr.reduce((a, i) => a + i.q * i.p, 0), c = dr.reduce((a, i) => a + i.q * i.c, 0), pr = r - c - (+draft.fee || 0);
+  if (dr.length && $('#dsum')) $('#dsum').textContent = `Total ${money(r)} · profit ${money(pr)} · margin ${pct(pr, r)}`;
+}
+function addLine(){
+  const p = P(+$('#ol-prod').value), q = +$('#ol-qty').value, pr = +$('#ol-price').value;
+  if (!p || q < 1) return say('Choose a product and a quantity of at least 1.');
+  const used = draft.items.filter(i => i.pid === p.id).reduce((a, i) => a + i.q, 0);
+  if (used + q > p.stock) return say('Only ' + p.stock + ' of ' + p.name + ' in stock.');
+  draft.items.push({pid:p.id, n:p.name, q, p:pr, c:p.cost}); render();
+}
+function saveOrder(){
+  if (!draft.items.length) return say('Add at least one item.');
+  draft.items.forEach(i => { const p = P(i.pid); if (p) p.stock -= i.q; });
+  const no = db.orders.reduce((a, o) => Math.max(a, o.no), 0) + 1;
+  db.orders.push({id:uid(), no, date:draft.date || today(), cust:draft.cust, email:draft.email, invoiceNo:null, fee:+draft.fee || 0, status:'Pending', items:draft.items});
+  draft = {cust:'', email:'', date:today(), fee:0, items:[]}; save(); say('Order #' + no + ' saved and stock updated.');
+}
+function setStatus(id, s){
+  const o = db.orders.find(x => x.id === id), was = o.status;
+  if (s === 'Cancelled' && was !== 'Cancelled') o.items.forEach(i => { const p = P(i.pid); if (p) p.stock += i.q; });
+  if (was === 'Cancelled' && s !== 'Cancelled') {
+    const short = o.items.find(i => { const p = P(i.pid); return !p || p.stock < i.q; });
+    if (short) return say('Not enough stock of ' + short.n + ' to reopen this order.');
+    o.items.forEach(i => P(i.pid).stock -= i.q);
+  }
+  o.status = s; save(); render();
+}
+
+function invPanel(){
+  const o = inv && db.orders.find(x => x.id === inv); if (!o) return '';
+  const dm = 'Hi ' + (o.cust || 'there') + ',\n\nPlease find your invoice attached.\n\nKind regards,\n' + db.biz.name;
+  return `<div class="card"><h2>Invoice for order #${o.no}${o.invoiceNo ? ' (' + esc(o.invoiceNo) + ')' : ''}</h2>
+  <div class="row"><label>Send to<input id="iv-to" type="email" value="${esc(o.email || '')}" style="width:260px"></label>
+  <label>Subject<input id="iv-sub" placeholder="Invoice number and your business name" style="width:300px"></label></div>
+  <label style="display:block;margin:8px 0;color:var(--mute);font-size:13px">Message<textarea id="iv-msg">${esc(dm)}</textarea></label>
+  <div class="row"><button class="btn" onclick="runInv('email')">Email invoice</button><button class="btn alt" onclick="runInv('save')">Save as PDF</button><button class="btn alt" onclick="inv=null;render()">Close</button></div>
+  <p class="empty">The invoice number is assigned the first time you save or email it and never changes.</p></div>`;
+}
+async function runInv(mode){
+  const o = db.orders.find(x => x.id === inv); if (!o) return;
+  if (!db.biz.name.trim()) return say('Add your business details in Settings first.');
+  const to = $('#iv-to').value.trim();
+  if (mode === 'email' && !/^\S+@\S+\.\S+$/.test(to)) return say('Enter a valid email address to send to.');
+  const sub = $('#iv-sub').value.trim(), msgText = $('#iv-msg').value;
+  o.email = to;
+  if (!o.invoiceNo) o.invoiceNo = (db.biz.prefix || 'INV-') + String(db.nextInvoice++).padStart(4, '0');
+  save();
+  const r = await window.api.invoice({order:o, biz:db.biz, cur:db.cur, mode, to, subject:sub || ('Invoice ' + o.invoiceNo + ' from ' + db.biz.name), message:msgText});
+  if (r.ok) inv = null;
+  say(r.msg);
+}
+function bizCard(){
+  const b = db.biz;
+  const f = (k, l, w) => `<label>${l}<input value="${esc(b[k] || '')}" onchange="db.biz.${k}=this.value;save()" style="width:${w || 200}px"></label>`;
+  const t = (k, l) => `<label>${l}<textarea style="height:72px;width:260px" onchange="db.biz.${k}=this.value;save()">${esc(b[k] || '')}</textarea></label>`;
+  return `<div class="card"><h2>Business details for invoices</h2>
+  <div class="row">${f('name', 'Business name', 240)}${f('email', 'Email', 220)}${f('phone', 'Phone', 150)}${f('taxId', 'Tax or VAT number', 170)}${f('prefix', 'Invoice prefix', 100)}
+  <label>Tax rate %<input type="number" step="0.01" min="0" value="${b.taxRate || 0}" onchange="db.biz.taxRate=+this.value;save()" style="width:90px"></label>
+  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" ${b.taxIncl ? 'checked' : ''} onchange="db.biz.taxIncl=this.checked;save()">Prices already include tax</label></div>
+  <div class="row" style="margin-top:10px">${t('address', 'Address')}${t('bank', 'Bank or payment details')}${t('footer', 'Footer note')}</div></div>`;
+}
+function mailCard(){
+  const m = window.api.mailGet();
+  const f = (id, l, v, w, ty) => `<label>${l}<input id="${id}" type="${ty || 'text'}" value="${esc(v)}" style="width:${w}px"></label>`;
+  return `<div class="card"><h2>Email setup</h2>
+  <p>Invoices are sent from your own email account. Gmail: server smtp.gmail.com, port 587, and an app password (Google account, Security, 2-step verification, App passwords). Outlook: server smtp.office365.com, port 587.</p>
+  <div class="row">${f('m-host', 'Server', m.host, 200)}${f('m-port', 'Port', m.port, 70, 'number')}${f('m-user', 'Username', m.user, 220)}${f('m-pass', 'Password', '', 180, 'password')}${f('m-from', 'From address', m.from, 220)}
+  <label style="flex-direction:row;align-items:center;gap:6px"><input id="m-sec" type="checkbox" ${m.secure ? 'checked' : ''}>SSL (port 465)</label></div>
+  <p class="empty">${m.hasPass ? 'A password is saved. Leave the box empty to keep it.' : 'No password saved yet.'}</p>
+  <div class="row"><button class="btn" onclick="saveMail()">Save email settings</button><button class="btn alt" onclick="testMail()">Send a test email to myself</button></div></div>`;
+}
+async function saveMail(){
+  const r = await window.api.mailSet({host:$('#m-host').value.trim(), port:$('#m-port').value, secure:$('#m-sec').checked, user:$('#m-user').value.trim(), from:$('#m-from').value.trim(), pass:$('#m-pass').value});
+  say(r.msg);
+}
+async function testMail(){ const r = await window.api.mailTest(); say(r.msg); }
+
+const hbar = (l, v, mx) => `<div class="hb"><span title="${esc(l)}">${esc(l)}</span><div><b style="width:${Math.max(2, Math.abs(v) / mx * 100)}%;background:${v < 0 ? 'var(--bad)' : 'var(--acc)'}"></b></div><em>${money(v)}</em></div>`;
+const short = v => { const a = Math.abs(v); return (v < 0 ? '−' : '') + (a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(1) + 'k' : Math.round(a)); };
+const SCOL = {Pending:'#c98a1b', Paid:'#2f7fb0', Shipped:'#7a5fb3', Completed:'#1d7a46', Cancelled:'#b3362b'};
+
+function trendChart(os){
+  const byDay = range !== 'all', g = {};
+  os.forEach(o => { const k = byDay ? o.date : o.date.slice(0, 7); const a = g[k] = g[k] || {r:0, p:0}; a.r += oRev(o); a.p += oProfit(o); });
+  const keys = Object.keys(g).sort().slice(-12);
+  if (!keys.length) return '<div class="empty">No orders in this period yet.</div>';
+  const R = keys.map(k => g[k].r), PF = keys.map(k => g[k].p);
+  const W = 640, H = 230, L = 52, B = 28, T = 10, hi = Math.max(1, ...R, ...PF), lo = Math.min(0, ...R, ...PF);
+  const y = v => T + (H - T - B) * (hi - v) / (hi - lo), gw = (W - L - 8) / keys.length, bw = Math.min(26, gw * .35), y0 = y(0);
+  let s = '';
+  for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; s += `<line x1="${L}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" style="stroke:var(--line)"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" style="fill:var(--mute)">${short(v)}</text>`; }
+  keys.forEach((k, i) => {
+    const cx = L + gw * (i + .5), lab = byDay ? k.slice(5) : k.slice(2);
+    [[R[i], cx - bw, 'var(--acc)', 'Revenue'], [PF[i], cx, 'var(--good)', 'Profit']].forEach(b => {
+      s += `<rect x="${b[1]}" y="${Math.min(y(b[0]), y0)}" width="${bw}" height="${Math.max(1, Math.abs(y(b[0]) - y0))}" rx="2" style="fill:${b[2]}"><title>${k} ${b[3]}: ${money(b[0])}</title></rect>`;
+    });
+    s += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" style="fill:var(--mute)">${lab}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Revenue and profit over time">${s}</svg><div class="legend"><i style="background:var(--acc)"></i>Revenue<i style="background:var(--good)"></i>Profit</div>`;
+}
+function statusDonut(){
+  const all = db.orders.filter(o => inRange(o.date)), cnt = {};
+  all.forEach(o => cnt[o.status] = (cnt[o.status] || 0) + 1);
+  if (!all.length) return '<div class="empty">No orders in this period yet.</div>';
+  let off = 25, segs = '';
+  STAT.forEach(s => { const n = cnt[s]; if (!n) return; const p = n / all.length * 100; segs += `<circle r="15.9155" cx="21" cy="21" fill="none" stroke="${SCOL[s]}" stroke-width="6" stroke-dasharray="${p} ${100 - p}" stroke-dashoffset="${off}"><title>${s}: ${n}</title></circle>`; off -= p; });
+  return `<div class="row" style="align-items:center;gap:20px"><svg viewBox="0 0 42 42" width="150" role="img" aria-label="Orders by status"><circle r="15.9155" cx="21" cy="21" fill="none" style="stroke:var(--line)" stroke-width="6"/>${segs}<text x="21" y="23" text-anchor="middle" font-size="7" font-weight="700" style="fill:var(--ink)">${all.length}</text></svg>
+  <div>${STAT.filter(s => cnt[s]).map(s => `<div><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${SCOL[s]};margin-right:6px"></i>${s}: ${cnt[s]}</div>`).join('')}</div></div>`;
+}
+function charts(os){
+  const agg = {};
+  os.forEach(o => o.items.forEach(i => agg[i.n] = (agg[i.n] || 0) + i.q * (i.p - i.c)));
+  const top = Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 8), mx = Math.max(1, ...top.map(t => Math.abs(t[1])));
+  return `<div class="card"><h2>Revenue and profit ${range === 'all' ? 'by month' : 'by day'}</h2>${trendChart(os)}</div>
+  <div class="two"><div class="card"><h2>Profit by product</h2>${top.length ? top.map(t => hbar(t[0], t[1], mx)).join('') : '<div class="empty">No sales in this period yet.</div>'}</div>
+  <div class="card"><h2>Orders by status</h2>${statusDonut()}</div></div>`;
+}
+
+let cs = '', csort = 'spent', cx = null;
+function custs(){
+  const m = {};
+  db.orders.forEach(o => {
+    const key = (o.email || o.cust || 'walk-in').trim().toLowerCase() || 'walk-in';
+    const c = m[key] = m[key] || {key, name:'', email:'', n:0, spent:0, profit:0, due:0, first:'', last:'', orders:[]};
+    if (o.cust && !c.name) c.name = o.cust;
+    if (o.email) c.email = o.email;
+    c.orders.push(o);
+    if (o.status === 'Cancelled') return;
+    c.n++; const r = oRev(o); c.spent += r; c.profit += oProfit(o);
+    if (o.status === 'Pending') c.due += r;
+    if (!c.first || o.date < c.first) c.first = o.date;
+    if (o.date > c.last) c.last = o.date;
+  });
+  return Object.values(m).filter(c => c.n).map(c => (c.name = c.name || c.email || 'Walk-in customer', c));
+}
+function ctab(){
+  const q = cs.trim().toLowerCase(), by = {spent:(a, b) => b.spent - a.spent, orders:(a, b) => b.n - a.n, recent:(a, b) => b.last.localeCompare(a.last), name:(a, b) => a.name.localeCompare(b.name)}[csort];
+  const rows = custs().filter(c => !q || (c.name + ' ' + c.email).toLowerCase().includes(q)).sort(by);
+  if (!rows.length) return '<div class="empty">No customers match.</div>';
+  return `<div class="scroll"><table><tr><th>Customer</th><th>Email</th><th class="n">Orders</th><th class="n">Spent</th><th class="n">Profit</th><th class="n">Avg order</th><th>Last order</th><th class="n">Awaiting payment</th></tr>${rows.map(c => `<tr class="${cx === c.key ? 'low' : ''}"><td><button class="btn alt sm" data-k="${esc(c.key)}" onclick="pick(this.dataset.k)">${esc(c.name)}</button></td><td>${esc(c.email || '–')}</td><td class="n">${c.n}</td><td class="n">${money(c.spent)}</td><td class="n ${c.profit < 0 ? 'neg' : ''}">${money(c.profit)}</td><td class="n">${money(c.spent / c.n)}</td><td>${c.last}</td><td class="n">${c.due ? money(c.due) : '–'}</td></tr>`).join('')}</table></div>`;
+}
+function pick(k){ cx = cx === k ? null : k; render(); }
+function cdetail(){
+  const c = cx && custs().find(x => x.key === cx); if (!c) return '';
+  const fav = {}; c.orders.filter(o => o.status !== 'Cancelled').forEach(o => o.items.forEach(i => fav[i.n] = (fav[i.n] || 0) + i.q));
+  const favs = Object.entries(fav).sort((a, b) => b[1] - a[1]).slice(0, 3).map(f => esc(f[0]) + ' (' + f[1] + ')').join(', ');
+  return `<div class="card"><h2>${esc(c.name)}</h2><p>${esc(c.email || 'No email on file')} · customer since ${c.first} · most bought: ${favs || '–'} · margin ${pct(c.profit, c.spent)}</p>
+  <div class="scroll"><table><tr><th>Order</th><th>Date</th><th class="n">Items</th><th class="n">Total</th><th>Status</th><th>Invoice</th></tr>${c.orders.slice().reverse().map(o => `<tr><td>#${o.no}</td><td>${o.date}</td><td class="n">${o.items.reduce((a, i) => a + i.q, 0)}</td><td class="n">${money(oRev(o))}</td><td>${o.status}</td><td>${esc(o.invoiceNo || '–')}</td></tr>`).join('')}</table></div></div>`;
+}
+function cust(){
+  const act = custs(), rep = act.filter(c => c.n > 1).length, total = act.reduce((a, c) => a + c.spent, 0), due = act.reduce((a, c) => a + c.due, 0);
+  const top = act.slice().sort((a, b) => b.spent - a.spent).slice(0, 8), mx = Math.max(1, ...top.map(c => c.spent));
+  return `<div class="grid">
+  <div class="stat"><small>Customers</small><b>${act.length}</b></div>
+  <div class="stat"><small>Repeat customers</small><b>${pct(rep, act.length)}</b></div>
+  <div class="stat"><small>Average lifetime value</small><b>${money(act.length ? total / act.length : 0)}</b></div>
+  <div class="stat"><small>Awaiting payment</small><b>${money(due)}</b></div></div>
+  <div class="card"><h2>Top customers by revenue</h2>${top.length ? top.map(c => hbar(c.name, c.spent, mx)).join('') : '<div class="empty">Customers appear here once you have orders. Orders with the same email, or the same name when there is no email, are grouped together.</div>'}</div>
+  <div class="card"><h2>All customers</h2><div class="row" style="margin-bottom:8px"><label>Search<input value="${esc(cs)}" oninput="cs=this.value;$('#ctab').innerHTML=ctab()"></label>
+  <label>Sort by<select onchange="csort=this.value;$('#ctab').innerHTML=ctab()">${[['spent','Most spent'],['orders','Most orders'],['recent','Most recent'],['name','Name']].map(o => `<option value="${o[0]}" ${csort === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></label></div><div id="ctab">${ctab()}</div></div>${cdetail()}`;
+}
+
+function secCard(){
+  const s = window.api.pinStatus(), a = window.api.accessInfo();
+  const lic = a.enforced ? 'Licensed to <b>' + esc(a.who) + '</b>, ' + (a.exp ? 'valid until ' + new Date(a.exp).toISOString().slice(0, 10) : 'no expiry') + (a.lastOk ? '. Last verified ' + new Date(a.lastOk).toLocaleString() : '') : 'Development mode, no token required';
+  return `<div class="card"><h2>Security</h2><p>${lic}.</p>
+  <div class="row">${s.set ? '<label>Current PIN<input id="pin-old" type="password" style="width:120px"></label>' : ''}<label>${s.set ? 'New PIN' : 'Set a PIN'}<input id="pin-new" type="password" placeholder="at least 4 characters" style="width:190px"></label>
+  <button class="btn" onclick="setPin(false)">${s.set ? 'Change PIN' : 'Turn on PIN lock'}</button>
+  ${s.set ? '<button class="btn alt" onclick="setPin(true)">Remove PIN</button><button class="btn alt" onclick="window.api.lock()">Lock now</button>' : ''}</div>
+  <p class="empty">With a PIN, the app asks for it when it opens and after ${a.idleMinutes} minutes of inactivity, and waits longer after repeated wrong tries. It keeps casual users out; it does not encrypt the data file.</p></div>`;
+}
+async function setPin(remove){
+  const pin = $('#pin-new').value;
+  if (!remove && !pin) return say('Enter a PIN first.');
+  const r = await window.api.pinSet({old:$('#pin-old') ? $('#pin-old').value : '', pin:remove ? '' : pin});
+  say(r.msg);
+}
+
+function bkBanner(){
+  const b = window.api.backupGet(), day = 864e5, ok = b.folder && b.folderOk;
+  let t = '';
+  if (!b.folder) t = 'Your data is only stored on this computer. Choose a backup folder so a lost or broken computer does not mean lost records.';
+  else if (!b.folderOk) t = 'The backup folder cannot be found. Is the drive or cloud folder connected? Backups are not being saved.';
+  else if (b.lastError) t = 'The last backup failed: ' + b.lastError;
+  else if (!b.lastOk || Date.now() - b.lastOk > 3 * day) t = b.lastOk ? 'The last backup was ' + Math.floor((Date.now() - b.lastOk) / day) + ' days ago.' : 'No backup has been made yet.';
+  return t ? `<div class="msg warnbar"><b>Backup warning:</b> ${esc(t)} <button class="btn sm" onclick="${ok ? 'backupNow()' : "go('set')"}">${ok ? 'Back up now' : 'Open settings'}</button></div>` : '';
+}
+let pendingRestore = null;
+function backupCard(){
+  const b = window.api.backupGet();
+  return `<div class="card"><h2>Backups outside this computer</h2>
+  <p>A backup is saved to a folder you choose once a day, again after you make changes, and when you close the app. Pick a folder inside OneDrive, Google Drive or Dropbox to get it into the cloud automatically, or use a USB or network drive. The newest 30 days are kept.</p>
+  <p>Folder: <b>${esc(b.folder || 'not chosen yet')}</b>${b.folder && !b.folderOk ? ' <span class="neg">(cannot be reached)</span>' : ''}<br>Last successful backup: ${b.lastOk ? new Date(b.lastOk).toLocaleString() : 'never'}</p>
+  <div class="row"><button class="btn" onclick="pickBackupFolder()">${b.folder ? 'Change folder' : 'Choose folder'}</button><button class="btn alt" onclick="backupNow()">Back up now</button></div>
+  <div class="row" style="margin-top:12px"><label style="flex-direction:row;align-items:center;gap:6px"><input id="bk-enc" type="checkbox" ${b.encrypt ? 'checked' : ''}>Protect backups with a password</label>
+  <label>${b.hasPass ? 'New password (empty keeps the current one)' : 'Password'}<input id="bk-pw" type="password" style="width:220px"></label><button class="btn alt" onclick="saveBackupSettings()">Save</button></div>
+  <p class="empty">If the password is forgotten, the backups cannot be opened and nobody can recover them, so write it down somewhere safe. Earlier unencrypted backups stay in the folder until they age out.</p>
+  <div class="row"><button class="btn alt" onclick="restoreBackup()">Restore from a backup file…</button>${pendingRestore ? '<label>Backup password<input id="rs-pw" type="password" style="width:200px"></label><button class="btn" onclick="restoreBackup(pendingRestore)">Restore</button>' : ''}</div></div>`;
+}
+async function pickBackupFolder(){ say((await window.api.backupFolder()).msg); }
+async function backupNow(){ say((await window.api.backupNow()).msg); }
+async function saveBackupSettings(){ say((await window.api.backupSettings({encrypt:$('#bk-enc').checked, password:$('#bk-pw').value})).msg); }
+async function restoreBackup(file){
+  const r = await window.api.backupRestore({file, password:file && $('#rs-pw') ? $('#rs-pw').value : ''});
+  pendingRestore = r.needPassword ? r.file : null;
+  if (r.ok) db = load();
+  say(r.msg);
+}
+function exps(){
+  const rows = db.expenses.slice().reverse().map(e => `<tr><td>${e.date}</td><td>${esc(e.desc)}</td><td class="n">${money(e.amt)}</td><td><button class="btn del sm" onclick="delExp(${e.id})">${armed === 'e' + e.id ? 'Confirm' : 'Delete'}</button></td></tr>`).join('');
+  return `<div class="card"><h2>Record an expense</h2><div class="row">
+  <label>Date<input id="e-date" type="date" value="${today()}"></label><label>What for<input id="e-desc"></label>
+  <label>Amount<input id="e-amt" type="number" step="0.01" min="0" style="width:110px"></label>
+  <button class="btn" onclick="addExp()">Add expense</button></div></div>
+  <div class="card"><h2>Expenses</h2>${rows ? `<div class="scroll"><table><tr><th>Date</th><th>What for</th><th class="n">Amount</th><th></th></tr>${rows}</table></div>` : '<div class="empty">Rent, ads, packaging and other running costs go here. They come off net profit.</div>'}</div>`;
+}
+function addExp(){
+  const a = +$('#e-amt').value, d = $('#e-desc').value.trim();
+  if (!d || !a) return say('Enter what it was for and an amount.');
+  db.expenses.push({id:uid(), date:$('#e-date').value || today(), desc:d, amt:a}); save(); say('Expense added.');
+}
+function delExp(id){
+  if (armed !== 'e' + id) { armed = 'e' + id; return render(); }
+  db.expenses = db.expenses.filter(e => e.id !== id); armed = null; save(); render();
+}
+
+function aboutCard(){
+  const i = window.api.info();
+  return `<div class="card"><h2>About this app</h2><p>Version ${esc(i.version)}<br>Data folder: ${esc(i.dataDir)}</p><div class="row"><button class="btn alt" onclick="window.api.openData()">Open data folder</button><button class="btn alt" onclick="window.api.checkUpdate().then(say)">Check for updates</button></div></div>`;
+}
+function sett(){
+  return aboutCard() + backupCard() + secCard() + bizCard() + mailCard() + `<div class="card"><h2>Currency symbol</h2><input value="${esc(db.cur)}" style="width:80px" oninput="db.cur=this.value;save()"><p class="empty">Applies after you switch tabs.</p></div>
+  <div class="card"><h2>Manual copy of your data (advanced)</h2>
+  <p>A backup is saved automatically in the data folder every day. Copy the text below to move your data to another computer. To restore, paste it here and load it.</p>
+  <textarea id="bk">${esc(JSON.stringify(db))}</textarea>
+  <div class="row" style="margin-top:8px"><button class="btn" onclick="restore()">Load pasted backup</button>
+  <button class="btn del" onclick="wipe()">${armed === 'wipe' ? 'Confirm: erase everything' : 'Erase all data'}</button></div></div>`;
+}
+function restore(){
+  try { const d = JSON.parse($('#bk').value); if (!d.products || !d.orders) throw 0; window.api.save(d); location.reload(); }
+  catch(e) { say('That text is not a valid backup.'); }
+}
+function wipe(){
+  if (armed !== 'wipe') { armed = 'wipe'; return render(); }
+  db = {products:[],orders:[],expenses:[],cur:db.cur,n:1,v:db.v}; armed = null; save(); say('All data erased.');
+}
+
+function render(){
+  $('#nav').innerHTML = Object.entries(TABS).map(([k, v]) => `<button class="${tab === k ? 'on' : ''}" onclick="go('${k}')">${v}</button>`).join('');
+  const body = {dash, prod, ord, cust, exp:exps, set:sett}[tab]();
+  $('#app').innerHTML = bkBanner() + (msg ? `<div class="msg">${esc(msg)}</div>` : '') + body; msg = '';
+}
+render();
+</script>
+</body>
+</html>

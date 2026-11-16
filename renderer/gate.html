@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop Ledger</title>
+<style>
+:root{--bg:#f3f1ec;--panel:#fff;--ink:#1d2a2e;--mute:#667478;--line:#d9d5ca;--acc:#1f5f5b;--acc-ink:#fff;--bad:#b3362b}
+@media (prefers-color-scheme:dark){:root{--bg:#141b1d;--panel:#1c2629;--ink:#e6ecec;--mute:#8d9fa3;--line:#2e3b3f;--acc:#5fb3ac;--acc-ink:#0d1516;--bad:#ef7a6e;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+.box{background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--acc);border-radius:6px;padding:28px;width:min(440px,92vw)}
+h1{font:700 24px Georgia,serif;margin:0 0 12px}
+input,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:8px}
+textarea{height:96px;font:12px monospace}
+.btn{margin-top:12px;background:var(--acc);color:var(--acc-ink);border:0;border-radius:4px;padding:8px 18px;font:inherit;font-weight:600;cursor:pointer}
+.m{color:var(--bad);min-height:1.4em}.mute{color:var(--mute)}
+</style></head>
+<body><div class="box"><h1>Shop Ledger</h1><div id="v"></div></div>
+<script>
+const $ = s => document.querySelector(s), s = window.api.gateState(), v = $('#v');
+const esc = t => String(t || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const msg = t => { $('#m').textContent = t || ''; };
+if (s.mode === 'pin') {
+  v.innerHTML = '<p class="mute">Enter your PIN to open the app.</p><input id="i" type="password" autofocus><p id="m" class="m"></p><button class="btn" id="go">Unlock</button>';
+  const go = async () => { const r = await window.api.pinCheck($('#i').value); if (!r.ok) { msg(r.msg); $('#i').value = ''; $('#i').focus(); } };
+  $('#go').onclick = go; $('#i').onkeydown = e => { if (e.key === 'Enter') go(); };
+} else if (s.mode === 'stale') {
+  v.innerHTML = '<p>' + esc(s.msg) + '</p><p id="m" class="m"></p><button class="btn" id="go">Try again</button>';
+  $('#go').onclick = async () => { msg('Checking…'); const r = await window.api.recheck(); if (!r.ok) msg('Still could not confirm access. Check your internet connection.'); };
+} else {
+  v.innerHTML = (s.msg ? '<p class="m">' + esc(s.msg) + '</p>' : '') + '<p class="mute">Paste the access token you were given to activate this app.</p><textarea id="i" placeholder="SL1...." autofocus></textarea><p id="m" class="m"></p><button class="btn" id="go">Activate</button>';
+  $('#go').onclick = async () => { msg('Checking…'); const r = await window.api.activate($('#i').value); if (!r.ok) msg(r.msg); };
+}
+</script></body></html>

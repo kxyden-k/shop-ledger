@@ -1,0 +1,55 @@
+{
+  "name": "shop-ledger",
+  "productName": "Shop Ledger",
+  "version": "1.3.0",
+  "description": "Orders, stock, pricing and profit tracker",
+  "main": "main.js",
+  "author": "Your Name",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "dist": "electron-builder --win --x64 --publish never"
+  },
+  "build": {
+    "appId": "com.example.shopledger",
+    "productName": "Shop Ledger",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "db.js",
+      "invoice.js",
+      "mail.js",
+      "security.js",
+      "backup.js",
+      "access.config.json",
+      "access/public.pem",
+      "renderer/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "YOUR_GITHUB_USER",
+      "repo": "shop-ledger"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11",
+    "nodemailer": "^10.5.0"
+  },
+  "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
+  }
+}
