@@ -16,5 +16,16 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm test
-      - run: npx electron-builder --win --x64 --publish always
-        env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+      - run: npx electron-builder --win --x64 --publish never
+      - name: Check build output
+        shell: bash
+        run: |
+          ls -la dist
+          test -f dist/latest.yml
+          ls dist/*.exe
+          cat dist/latest.yml
+      - name: Create release and upload files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ github.ref_name }}" dist/*.exe dist/*.exe.blockmap dist/latest.yml --title "${{ github.ref_name }}" --generate-notes
