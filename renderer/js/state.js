@@ -20,6 +20,7 @@ const ui = {
   purchasingView: 'orders', // Purchasing tab: 'orders' | 'suppliers'
   purchaseDraft: emptyDraftPurchase(),
   historyProductId: null,   // product whose stock history is open
+  bomProductId: null,       // product whose recipe (bill of materials) is open
   report: { id: 'pnl', preset: 'year', from: '', to: '' },
   insightsPeriod: '90',     // Insights tab: number of days, 'year' or 'lastYear'
   settingsView: 'business', // Settings tab section
@@ -47,7 +48,7 @@ const exclTax = () => currentTax(db).rate > 0 ? ' (excl. tax)' : '';
 
 // Forget anything on screen that points at records, after the data is replaced or erased.
 function resetScreens() {
-  Object.assign(ui, { openOrderId: null, creditForm: false, send: null, selectedCustomer: null, historyProductId: null,
+  Object.assign(ui, { openOrderId: null, creditForm: false, send: null, selectedCustomer: null, historyProductId: null, bomProductId: null,
     draft: emptyDraftOrder(), purchaseDraft: emptyDraftPurchase() });
 }
 

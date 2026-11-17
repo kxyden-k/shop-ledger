@@ -286,3 +286,68 @@ test('erasing records keeps business details and document numbering', () => {
   assert.equal(cleared.biz.name, 'Shop');
   assert.deepEqual([cleared.nextInvoice, cleared.nextQuote, cleared.cur], [7, 3, 'R']);
 });
+
+// A bakery: flour and butter go into croissants; croissants go into a platter. Flour is also sold on its own.
+const bakery = () => shop({ products: [
+  { id: 1, name: 'Flour', unit: 'kg', cost: 20, price: 30, stock: 5, reorder: 1 },
+  { id: 2, name: 'Butter', unit: 'kg', cost: 100, price: 0, stock: 1, reorder: 0 },
+  { id: 3, name: 'Croissant', cost: 0, price: 15, stock: 0, reorder: 0 },
+  { id: 4, name: 'Platter', cost: 0, price: 250, stock: 0, reorder: 0 }
+] });
+
+test('a bill of materials is built from stock, and the finished goods are costed from it', () => {
+  const data = bakery(), [flour, butter, croissant] = data.products;
+  assert.equal(L.setBomLine(data, croissant, 1, 0.1), '');
+  assert.equal(L.setBomLine(data, croissant, 2, 0.05), '');
+  assert.equal(L.bomCost(data, croissant), 7);            // 0.1 × 20 + 0.05 × 100
+  assert.equal(L.maxBuildable(data, croissant), 20);       // butter runs out first: 1 / 0.05
+  const built = L.buildProduct(data, croissant, 12, TODAY);
+  assert.deepEqual(built, { no: 'B-0001', unitCost: 7 });
+  assert.equal(flour.stock, 3.8);                           // no floating-point dust
+  assert.equal(butter.stock, 0.4);
+  assert.equal(croissant.stock, 12);
+  assert.equal(croissant.cost, 7);
+  assert.deepEqual(data.moves.map(m => [m.pid, m.q, m.why, m.ref]), [
+    [1, -1.2, 'Used in build', 'B-0001: 12 × Croissant'], [2, -0.6, 'Used in build', 'B-0001: 12 × Croissant'], [3, 12, 'Built', 'B-0001']]);
+
+  // A dearer butter: the next build averages with the croissants already made.
+  butter.cost = 160;
+  assert.equal(L.buildProduct(data, croissant, 4, TODAY).no, 'B-0002');
+  assert.equal(croissant.cost, 7.75);                       // (12 × 7 + 4 × 10) / 16
+  // Selling croissants does not touch the flour or butter again.
+  sell(data, [item(3, 2, 15, croissant.cost)]);
+  assert.equal(flour.stock, 3.4); assert.equal(croissant.stock, 14);
+});
+
+test('a build refuses when a component runs short, and says how many can be made', () => {
+  const data = bakery(), croissant = data.products[2];
+  L.setBomLine(data, croissant, 2, 0.05);
+  assert.match(L.buildProduct(data, croissant, 30, TODAY).error, /Not enough Butter: making 30 needs 1.5 kg and you have 1. You can make 20 at most./);
+  assert.match(L.buildProduct(data, data.products[3], 1, TODAY).error, /no bill of materials/);
+  assert.match(L.buildProduct(data, croissant, 0, TODAY).error, /how many/);
+  assert.equal(data.moves.length, 0);
+});
+
+test('bills of materials can nest but never loop', () => {
+  const data = bakery(), [flour, , croissant, platter] = data.products;
+  L.setBomLine(data, croissant, 1, 0.1);
+  assert.equal(L.setBomLine(data, platter, 3, 12), '');
+  assert.match(L.setBomLine(data, croissant, 4, 1), /Platter cannot go into Croissant, because Platter is made with Croissant/);
+  assert.match(L.setBomLine(data, flour, 4, 1), /cannot go into Flour/);   // flour → croissant → platter → flour
+  assert.match(L.setBomLine(data, platter, 4, 1), /itself/);
+  L.setBomLine(data, platter, 3, 10);                                       // changing a quantity keeps one line
+  assert.deepEqual(platter.bom, [{ pid: 3, q: 10 }]);
+  L.setBomLine(data, platter, 3, 0);
+  assert.deepEqual(platter.bom, []);
+  assert.deepEqual(L.usedIn(data, 1).map(p => p.name), ['Croissant']);
+});
+
+test('writing off stock takes it off the shelf and records the loss as an expense', () => {
+  const data = bakery(), flour = data.products[0];
+  assert.equal(L.writeOffStock(data, flour, 0.5, 'Damp', TODAY), '');
+  assert.equal(flour.stock, 4.5);
+  assert.deepEqual(data.moves.map(m => [m.q, m.why, m.ref]), [[-0.5, 'Written off', 'Damp']]);
+  assert.deepEqual(data.expenses.map(e => [e.desc, e.amt, e.cat]), [['0.5 kg × Flour: Damp', 10, 'Stock written off']]);
+  assert.match(L.writeOffStock(data, flour, 9, '', TODAY), /only have 4.5 kg/);
+  assert.equal(L.periodSummary(data, 'all', new Date(TODAY)).expenses, 10);
+});

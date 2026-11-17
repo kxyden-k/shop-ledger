@@ -4,10 +4,12 @@
 // Saved data keeps short field names. They are in every user's data.json, so renaming one needs a
 // migration in db.js.
 //   top level   {products, orders, expenses, quotes, credits, suppliers, purchases, moves,
-//                cur, n, nextInvoice, nextQuote, nextCredit, nextPurchase, biz, v}
+//                cur, n, nextInvoice, nextQuote, nextCredit, nextPurchase, nextBuild, biz, v}
 //                 cur: currency symbol, n: next id, v: schema version
-//   product     {id, sku, name, cost, price, stock, reorder, h}
+//   product     {id, sku, name, cost, price, stock, reorder, h, unit, bom}
 //                 h: price history, [{d: date, o: old price}]
+//                 unit: optional, e.g. 'kg'; stock and quantities may have decimals
+//                 bom: optional bill of materials, what goes into ONE of it: [{pid, q}]
 //   order       {id, no, date, cust, email, invoiceNo, fee, status, items, tax, payments}
 //                 tax: {rate, incl} as it was when the order was made
 //                 payments: [{id, date, amt, method, note}], a negative amt is a refund
@@ -28,6 +30,8 @@ const QUOTE_VALID_DAYS = 30;
 
 const sumOf = (list, valueOf) => list.reduce((total, x) => total + valueOf(x), 0);
 const round2 = v => Math.round(v * 100) / 100;
+// Quantities can be weights (2.35 kg), so they keep three decimals and lose floating-point dust.
+const roundQty = v => Math.round(v * 1000) / 1000;
 const fmtMoney = (cur, v) => (v < 0 ? '−' : '') + cur + Math.abs(+v || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const docNumber = (prefix, n) => prefix + String(n).padStart(4, '0');
 const addDays = (date, days) => new Date(new Date(date).getTime() + days * DAY_MS).toISOString().slice(0, 10);
@@ -139,10 +143,12 @@ const productById = (products, id) => products.find(p => p.id === id);
 
 // Every stock change goes through here so it lands in the product's history.
 // why: 'Sale' | 'Order cancelled' | 'Order reopened' | 'Purchase' | 'Return' | 'Adjustment' | 'Opening stock'
+//      | 'Built' | 'Used in build' | 'Written off'
 function moveStock(data, pid, qty, why, ref, date) {
   const p = productById(data.products, pid);
+  qty = roundQty(qty);
   if (!p || !qty) return;
-  p.stock += qty;
+  p.stock = roundQty(p.stock + qty);
   data.moves.push({ id: data.n++, date, pid, q: qty, why, ref });
 }
 
@@ -169,7 +175,7 @@ function changeAllPrices(products, percentChange, date) {
 // The first item there isn't enough stock for, or undefined. Quantities of the same product are added up.
 function stockShortage(products, items) {
   const wanted = {};
-  items.forEach(i => wanted[i.pid] = (wanted[i.pid] || 0) + i.q);
+  items.forEach(i => wanted[i.pid] = roundQty((wanted[i.pid] || 0) + i.q));
   return items.find(i => { const p = productById(products, i.pid); return !p || p.stock < wanted[i.pid]; });
 }
 
@@ -247,7 +253,7 @@ function removePayment(order, paymentId) {
 function creditableItems(data, order) {
   const credited = {};
   creditsOf(data, order).forEach(c => c.items.forEach(i => credited[i.line] = (credited[i.line] || 0) + i.q));
-  return order.items.map((i, line) => ({ ...i, line, left: i.q - (credited[line] || 0) }));
+  return order.items.map((i, line) => ({ ...i, line, left: roundQty(i.q - (credited[line] || 0)) }));
 }
 
 // quantities: how many of each order line to credit, in order-item order.
@@ -257,8 +263,8 @@ function createCredit(data, order, quantities, { reason, restock, date }) {
   const lines = creditableItems(data, order);
   const items = [];
   for (const l of lines) {
-    const q = +quantities[l.line] || 0;
-    if (q < 0 || !Number.isInteger(q)) return { error: 'Enter whole quantities.' };
+    const q = roundQty(+quantities[l.line] || 0);
+    if (!(q >= 0)) return { error: 'Enter quantities of 0 or more.' };
     if (q > l.left) return { error: 'Only ' + l.left + ' of ' + l.n + ' left to credit.' };
     if (q) items.push({ line: l.line, pid: l.pid, n: l.n, q, p: l.p, c: l.c });
   }
@@ -329,6 +335,89 @@ function receivePurchase(data, purchase, today) {
   purchase.receivedOn = today;
   return '';
 }
+
+// ---- bills of materials and builds ----
+// Like Sage 50: a product's bill of materials says what goes into one of it. Building a quantity is
+// a deliberate step: it takes the components out of stock and puts the finished product in. Selling
+// never touches the components, so what is on the shelf is what has actually been made.
+
+const bomOf = product => product.bom || [];
+const unitText = product => product.unit ? ' ' + product.unit : '';
+// What the components of one cost at today's cost prices.
+const bomCost = (data, product) => round2(sumOf(bomOf(product), c => c.q * ((productById(data.products, c.pid) || {}).cost || 0)));
+
+// Whether making `product` needs `componentId`, directly or inside another component's recipe.
+function bomUses(data, product, componentId, seen = new Set()) {
+  if (!product || seen.has(product.id)) return false;
+  seen.add(product.id);
+  return bomOf(product).some(c => c.pid === componentId || bomUses(data, productById(data.products, c.pid), componentId, seen));
+}
+
+// Adds, changes or (with q 0) removes one component. Returns an error message, or '' when done.
+function setBomLine(data, product, pid, q) {
+  const component = productById(data.products, pid);
+  if (!component) return 'Choose a product.';
+  if (pid === product.id) return 'A product cannot be made from itself.';
+  if (bomUses(data, component, product.id)) return `${component.name} cannot go into ${product.name}, because ${component.name} is made with ${product.name}.`;
+  q = roundQty(+q);
+  if (!(q >= 0)) return 'Enter a quantity of 0 or more.';
+  const lines = bomOf(product);
+  if (!q) product.bom = lines.filter(c => c.pid !== pid);
+  else if (lines.some(c => c.pid === pid)) product.bom = lines.map(c => c.pid === pid ? { pid, q } : c);
+  else product.bom = [...lines, { pid, q }];
+  return '';
+}
+
+// The most that can be built from the stock on hand, in whole units.
+function maxBuildable(data, product) {
+  const lines = bomOf(product);
+  if (!lines.length) return 0;
+  return Math.max(0, Math.min(...lines.map(c => {
+    const p = productById(data.products, c.pid);
+    return p ? Math.floor(roundQty(p.stock / c.q)) : 0;
+  })));
+}
+
+// Builds qty of a product. Returns {error} or {no, unitCost}. The finished product's cost becomes the
+// weighted average of what was already on the shelf and what this build cost, as when stock is bought.
+function buildProduct(data, product, qty, date) {
+  qty = roundQty(+qty);
+  const lines = bomOf(product);
+  if (!lines.length) return { error: product.name + ' has no bill of materials yet. Add what goes into one first.' };
+  if (!(qty > 0)) return { error: 'Enter how many to make.' };
+  const needs = lines.map(c => ({ p: productById(data.products, c.pid), need: roundQty(c.q * qty) }));
+  if (needs.some(x => !x.p)) return { error: 'A component has been deleted. Remove it from the bill of materials first.' };
+  const short = needs.find(x => x.p.stock < x.need);
+  if (short) {
+    const most = maxBuildable(data, product);
+    return { error: `Not enough ${short.p.name}: making ${qty} needs ${short.need}${unitText(short.p)} and you have ${short.p.stock}. `
+      + (most > 0 ? `You can make ${most} at most.` : 'Buy or make more first.') };
+  }
+  const no = docNumber('B-', data.nextBuild || 1);
+  data.nextBuild = (data.nextBuild || 1) + 1;
+  const unitCost = bomCost(data, product);
+  needs.forEach(x => moveStock(data, x.p.id, -x.need, 'Used in build', `${no}: ${qty} × ${product.name}`, date));
+  product.cost = product.stock > 0 ? round2((product.stock * product.cost + qty * unitCost) / (product.stock + qty)) : unitCost;
+  moveStock(data, product.id, qty, 'Built', no, date);
+  return { no, unitCost };
+}
+
+// Takes damaged, expired or unsold stock off the shelf. Its value at cost is recorded as an expense
+// in the 'Stock written off' category, so profit shows the loss, as a write-off does in Sage.
+const WRITE_OFF_CATEGORY = 'Stock written off';
+function writeOffStock(data, product, qty, reason, date) {
+  qty = roundQty(+qty);
+  if (!(qty > 0)) return 'Enter how much to write off.';
+  if (qty > product.stock) return `You only have ${product.stock}${unitText(product)} of ${product.name}.`;
+  reason = (reason || '').trim() || 'Written off';
+  moveStock(data, product.id, -qty, 'Written off', reason, date);
+  const value = round2(qty * product.cost);
+  if (value > 0) data.expenses.push({ id: data.n++, date, desc: `${qty}${unitText(product)} × ${product.name}: ${reason}`, amt: value, cat: WRITE_OFF_CATEGORY });
+  return '';
+}
+
+// Products whose bill of materials uses this one, for warnings before it is deleted.
+const usedIn = (data, pid) => data.products.filter(p => bomOf(p).some(c => c.pid === pid));
 
 // ---- customers ----
 // Customers aren't stored; they are worked out from orders. Orders with the same email, or the same
@@ -433,6 +522,7 @@ if (typeof module !== 'undefined') {
     productById, moveStock, stockHistory, setStock, setPrice, changeAllPrices, stockShortage,
     createOrder, changeOrderStatus, orderPaid, creditsOf, orderCredited, orderBalance, paymentState, addPayment, removePayment,
     creditableItems, createCredit, createQuote, quoteStatus, convertQuote, purchaseTotal, createPurchase, receivePurchase,
+    roundQty, bomOf, unitText, bomCost, bomUses, setBomLine, maxBuildable, buildProduct, WRITE_OFF_CATEGORY, writeOffStock, usedIn,
     customerKey, summarizeCustomers, matchCustomer, favouriteProducts, agedDebtors, customerStatement, clearRecords
   };
 }

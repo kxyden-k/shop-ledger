@@ -45,12 +45,19 @@ function cleanTargets(input) {
 // on the order date, so they say nothing about how quickly customers really paid.
 const MIGRATED_PAYMENT_NOTE = 'Paid before payments were tracked';
 const MONTH_DAYS = 30.44;
+// A sales rate from fewer days than this is too shaky to plan with, so it is spread over this many.
+const MIN_RATE_DAYS = 7;
+// A product needs this many days of sales in the period before it can be called overstocked.
+const MIN_OVERSTOCK_DAYS = 30;
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
 const STATUS_LABEL = { good: 'On target', warn: 'Watch', bad: 'Act on it', '': '' };
 
 const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / DAY_MS);
 const shiftYear = (date, years) => (+date.slice(0, 4) + years) + date.slice(4);
 const pctText = v => v.toFixed(1) + '%';
+const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+// "about 4 a month", or "less than one a month" for slow sellers.
+const salesRateText = perDay => perDay * MONTH_DAYS < 1 ? 'less than one a month' : `about ${Math.round(perDay * MONTH_DAYS)} a month`;
 const higherIsBetter = (v, good, okay) => v == null ? '' : v >= good ? 'good' : v >= okay ? 'warn' : 'bad';
 const lowerIsBetter = (v, good, okay) => v == null ? '' : v <= good ? 'good' : v <= okay ? 'warn' : 'bad';
 
@@ -77,25 +84,34 @@ function priceForMargin(cost, marginPct, tax) {
 }
 
 // How each product is doing: units sold in the period, sales rate, days of cover, margin, and
-// whether it has stopped selling.
+// whether it has stopped selling. A product added during the period is judged only on the days
+// since it was added, so a new product's first sale isn't spread over months it didn't exist.
 function productActivity(data, from, to, today, t) {
-  const tax = currentTax(data), days = daysBetween(from, to) + 1;
-  const lastSale = {}, sold = {}, returned = {}, added = {}, onOrder = {};
+  const tax = currentTax(data);
+  const lastSale = {}, sold = {}, used = {}, returned = {}, added = {}, onOrder = {};
   data.orders.filter(o => !isCancelled(o)).forEach(o => o.items.forEach(i => {
     if (!lastSale[i.pid] || o.date > lastSale[i.pid]) lastSale[i.pid] = o.date;
     if (inRange(o.date, from, to)) sold[i.pid] = (sold[i.pid] || 0) + i.q;
   }));
   (data.credits || []).filter(c => inRange(c.date, from, to)).forEach(c => c.items.forEach(i => returned[i.pid] = (returned[i.pid] || 0) + i.q));
+  // Components used in builds are demand too: the stock goes, just into another product.
+  (data.moves || []).filter(m => m.why === 'Used in build').forEach(m => {
+    if (!lastSale[m.pid] || m.date > lastSale[m.pid]) lastSale[m.pid] = m.date;
+    if (inRange(m.date, from, to)) used[m.pid] = (used[m.pid] || 0) - m.q;
+  });
   // When a product was added is only known for products added from version 2.0 onwards.
   (data.moves || []).filter(m => m.why === 'Opening stock').forEach(m => { if (!added[m.pid] || m.date < added[m.pid]) added[m.pid] = m.date; });
   (data.purchases || []).filter(p => p.status === 'Ordered').forEach(p => p.items.forEach(i => onOrder[i.pid] = (onOrder[i.pid] || 0) + i.q));
   return data.products.map(p => {
-    const units = sold[p.id] || 0, rate = units / days;
+    const units = sold[p.id] || 0, usedUp = roundQty(used[p.id] || 0);
+    const start = added[p.id] && added[p.id] > from ? added[p.id] : from;
+    const activeDays = Math.max(1, daysBetween(start, to) + 1);
+    const rate = (units + usedUp) / Math.max(activeDays, MIN_RATE_DAYS);
     const netPrice = tax.rate > 0 && tax.incl ? p.price / (1 + tax.rate / 100) : p.price;
     const quietDays = lastSale[p.id] ? daysBetween(lastSale[p.id], today) : Infinity;
     const age = added[p.id] ? daysBetween(added[p.id], today) : Infinity;
     return {
-      p, units, rate, netPrice, tax, onOrder: onOrder[p.id] || 0, returned: returned[p.id] || 0, lastSale: lastSale[p.id] || '',
+      p, units, usedUp, rate, activeDays, addedInPeriod: start !== from, netPrice, tax, onOrder: onOrder[p.id] || 0, returned: returned[p.id] || 0, lastSale: lastSale[p.id] || '',
       cover: rate > 0 ? p.stock / rate : Infinity,
       margin: netPrice > 0 ? (netPrice - p.cost) / netPrice * 100 : null,
       dead: p.stock > 0 && quietDays > t.deadStockDays && age > t.deadStockDays
@@ -286,21 +302,28 @@ function computeInsights(data, { from, to, today }) {
     }
     const cover = x.rate > 0 ? (x.p.stock + x.onOrder) / x.rate : Infinity;
     const orderQty = Math.max(1, Math.ceil(x.rate * t.stockDays - Math.max(0, x.p.stock) - x.onOrder));
-    const buy = { kind: 'purchase', ref: x.p.id, value: orderQty, label: `Order ${orderQty}` };
-    const sold = `You sold ${x.units} in the last ${days} days`;
+    const unit = unitText(x.p);
+    // Things with a recipe are made, not bought.
+    const made = bomOf(x.p).length > 0, get = made ? 'Make' : 'Order';
+    const buy = made ? { kind: 'make', ref: x.p.id, value: orderQty, label: `Make ${orderQty}` } : { kind: 'purchase', ref: x.p.id, value: orderQty, label: `Order ${orderQty}` };
+    const took = x.usedUp ? `You used ${x.usedUp}${unit} in builds` + (x.units ? ` and sold ${x.units}` : '') : `You sold ${x.units}`;
+    const sold = x.addedInPeriod
+      ? `${took} in the ${plural(x.activeDays, 'day')} since you added it`
+      : `${took} in the last ${days} days`;
     if (x.p.stock <= 0 && x.rate > 0 && x.onOrder === 0) {
-      recommend('high', 'Stock', `${name} is out of stock`, `${sold}. Order about ${orderQty} to cover ${t.stockDays} days.`, buy, orderQty * x.netPrice);
+      recommend('high', 'Stock', `${name} is out of stock`, `${sold}. ${get} about ${orderQty}${unit} to cover ${t.stockDays} days.`, buy, orderQty * x.netPrice);
     } else if (x.rate > 0 && cover < t.stockDays / 2) {
-      recommend('medium', 'Stock', `${name} runs out in about ${Math.max(0, Math.round(x.p.stock / x.rate))} days`,
-        `${sold}${x.onOrder ? `, and ${x.onOrder} are already on order` : ''}. Order about ${orderQty} more to cover ${t.stockDays} days.`, buy, orderQty * x.netPrice);
+      const daysLeft = Math.round(x.p.stock / x.rate);
+      recommend('medium', 'Stock', `${name} runs out ${daysLeft < 1 ? 'within a day' : 'in about ' + plural(daysLeft, 'day')}`,
+        `${sold}${x.onOrder ? `, and ${x.onOrder} are already on order` : ''}. ${get} about ${orderQty}${unit} more to cover ${t.stockDays} days.`, buy, orderQty * x.netPrice);
     } else if (x.dead) {
       const value = x.p.stock * x.p.cost;
       recommend(stockValue > 0 && value / stockValue >= 0.05 ? 'medium' : 'low', 'Stock', `${name} is not selling`,
-        `${x.p.stock} in stock worth ${m(value)} at cost, ${x.lastSale ? 'last sold on ' + x.lastSale : 'never sold'}. A discount or bundle would free up the cash. Hold off reordering it.`,
+        `${x.p.stock}${unit} in stock worth ${m(value)} at cost, ${x.lastSale ? 'last sold or used on ' + x.lastSale : 'never sold or used'}. A discount or bundle would free up the cash. Hold off reordering it.`,
         { kind: 'product', ref: x.p.id, label: 'Stock history' }, value);
-    } else if (x.rate > 0 && x.cover > t.stockDays * 4 && x.p.cost > 0) {
-      recommend('low', 'Stock', `${name} has about ${Math.round(x.cover / MONTH_DAYS)} months of stock`,
-        `At about ${Math.round(x.rate * MONTH_DAYS)} a month you have ${x.p.stock}. Hold off reordering; ${m((x.p.stock - x.rate * t.stockDays) * x.p.cost)} more than you need is tied up.`,
+    } else if (x.rate > 0 && x.cover > t.stockDays * 4 && x.p.cost > 0 && x.activeDays >= MIN_OVERSTOCK_DAYS) {
+      recommend('low', 'Stock', `${name} has about ${plural(Math.round(x.cover / MONTH_DAYS), 'month')} of stock`,
+        `You get through ${salesRateText(x.rate)} and have ${x.p.stock}${unit}. Hold off reordering; ${m((x.p.stock - x.rate * t.stockDays) * x.p.cost)} more than you need is tied up.`,
         { kind: 'product', ref: x.p.id, label: 'Stock history' }, (x.p.stock - x.rate * t.stockDays) * x.p.cost);
     }
     if (x.returned >= 2 && x.units > 0 && x.returned / x.units >= 0.1) {

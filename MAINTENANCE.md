@@ -133,3 +133,12 @@ When you run the app from source (`npm start`) on the machine that has `keys/pri
 **Tax in the figures (from 2.1.0).** Anything about how the business is doing (dashboard sales and profit, product margins, charts, customer sales, reports, insights) leaves tax out, because tax collected belongs to the tax authority. Anything about what a customer is charged or owes (order totals, balances, invoices, statements) includes it. Before 2.1.0, shops whose prices include tax saw sales and profit on the Dashboard and Products tab with the tax still in, so those figures drop after updating. Expect questions, and point to this rule. The rule lives at the top of `renderer/js/ledger.js` (`orderSales`, `orderProfit`, `netOfTax`).
 
 **Loading bar.** A thin bar across the top of the window shows while the app waits on slow work (PDFs, email, backups, updates, licences). Wrap any new slow call in `whileBusy()` (or `startBusy()`/`endBusy()`) and it appears automatically. It only shows for work that takes longer than 150ms.
+
+## 15. Recipes (bills of materials), making and write-offs (added in 2.2.0)
+Works the way Sage 50 does it: deliberate steps, nothing automatic on sale.
+- `product.bom` is an optional list `[{pid, q}]`: what goes into ONE of the product. `product.unit` is optional text (empty means "each"). Both are optional fields, so no schema migration was needed.
+- Quantities can have decimals (weights). `roundQty` keeps three decimals; `moveStock` applies it to every stock change.
+- `buildProduct` checks every component first, then takes them out ("Used in build", ref `B-0001: 12 × Croissant`) and adds the finished goods ("Built", ref `B-0001`). The finished cost is a weighted average of the shelf and the build, like `receivePurchase`. Recipes can nest (a platter of croissants); `bomUses` stops loops.
+- `writeOffStock` removes stock ("Written off") and adds an expense in the `Stock written off` category, so profit reflects the loss. Deleting that expense does not put the stock back.
+- Insights counts "Used in build" moves as demand, so ingredients get reorder advice; products with a recipe get "Make about N" instead of "Order".
+- A product that is in a recipe cannot be deleted until it is removed from that recipe.

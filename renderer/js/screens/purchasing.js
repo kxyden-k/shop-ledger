@@ -83,7 +83,7 @@ function newPurchaseCard() {
   <label>Date<input id="po-date" type="date" value="${draft.date}" oninput="ui.purchaseDraft.date=this.value"></label></div>
   <form class="row" style="margin-top:10px" onsubmit="addPurchaseItem();return false">
   <label>Product<select id="po-prod" onchange="onPurchaseProductChange(this.value)">${productOptions}</select></label>
-  <label>Qty<input id="po-qty" type="number" min="1" step="1" value="1" style="width:80px"></label>
+  <label>Qty<input id="po-qty" type="number" min="0" step="any" value="1" style="width:80px"></label>
   <label>Unit cost<input id="po-cost" type="number" step="0.01" min="0" value="${db.products[0].cost}" style="width:100px"></label>
   <button class="btn alt">Add item</button></form>
   ${draft.items.length ? `<div class="scroll" style="margin-top:10px"><table><tr>${[th('Item'), thNum('Qty'), thNum('Unit cost'), thNum('Amount'), th('')].join('')}</tr>${itemRows}</table></div>` : ''}
@@ -99,9 +99,9 @@ function onPurchaseProductChange(id) {
 function addPurchaseItem() {
   const p = findProduct(+$('#po-prod').value), qty = +$('#po-qty').value, cost = +$('#po-cost').value;
   if (!p) return showError('Choose a product.', '#po-prod');
-  if (!(qty >= 1) || !Number.isInteger(qty)) return showError('Enter a whole quantity of at least 1.', '#po-qty');
+  if (!(qty > 0)) return showError('Enter a quantity above 0.', '#po-qty');
   if (!(cost >= 0)) return showError('Enter the unit cost.', '#po-cost');
-  ui.purchaseDraft.items.push({ pid: p.id, n: p.name, q: qty, c: cost });
+  ui.purchaseDraft.items.push({ pid: p.id, n: p.name, q: roundQty(qty), c: cost });
   ui.afterRender = { focus: '#po-prod' };
   render();
 }

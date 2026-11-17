@@ -115,6 +115,36 @@ test('stock recommendations: out of stock, running low, already on order', () =>
   assert.ok(!rec(r, 'Mug runs out')); // enough on order now
 });
 
+test('a product added recently is judged on the days it has existed, not the whole period', () => {
+  // Bug report: added today with 10 opening stock, 10 bought in, 1 sold. Over a 90-day period it was
+  // said to have "about 56 months of stock", selling "about 0 a month".
+  const data = shop({ products: [{ id: 5, name: 'Fish', cost: 250, price: 400, stock: 0, reorder: 7 }] });
+  L.moveStock(data, 5, 10, 'Opening stock', 'Product added', TODAY);
+  data.suppliers.push({ id: 50, name: 'Acme' });
+  L.receivePurchase(data, L.createPurchase(data, { supplierId: 50, date: TODAY, items: [{ pid: 5, n: 'Fish', q: 10, c: 250 }] }, TODAY), TODAY);
+  sell(data, TODAY, [item(5, 1, 400, 250, 'Fish')]);
+  const r = run(data, '2026-08-19'); // 90 days
+  assert.ok(!r.recommendations.some(x => x.title.startsWith('Fish has about')), 'no overstock verdict on a day-old product');
+  assert.ok(!r.recommendations.some(x => x.title.startsWith('Fish is not selling')));
+
+  // A fast seller added three days ago is judged on those days: 15 sold, 3 left, so it runs out soon.
+  const fast = shop({ products: [{ id: 6, name: 'Bread', cost: 10, price: 20, stock: 0, reorder: 0 }] });
+  L.moveStock(fast, 6, 18, 'Opening stock', 'Product added', '2026-11-14');
+  sell(fast, '2026-11-15', [item(6, 15, 20, 10, 'Bread')]);
+  const low = rec(run(fast, '2026-08-19'), 'Bread runs out');
+  assert.ok(low, 'running low is spotted');
+  assert.match(low.detail, /in the 7 days since you added it|since you added it/);
+});
+
+test('slow sellers say "less than one a month" rather than "about 0 a month"', () => {
+  const data = shop({ products: [{ id: 7, name: 'Kettle', cost: 100, price: 200, stock: 19, reorder: 1 }] }); // added before 2.0: age unknown
+  sell(data, '2026-11-10', [item(7, 1, 200, 100, 'Kettle')]);
+  const slow = rec(run(data, '2026-08-19'), 'Kettle has about');
+  assert.ok(slow);
+  assert.match(slow.detail, /less than one a month/);
+  assert.doesNotMatch(slow.detail, /about 0 a month/);
+});
+
 test('customer concentration, returns and expiring quotes', () => {
   const data = shop();
   const big = sell(data, '2026-11-01', [item(1, 9, 100, 40, 'Mug')]);
@@ -172,4 +202,35 @@ test('formatting', () => {
   assert.equal(f(1200, 'moneyMonth'), 'R1,200.00 a month');
   assert.equal(f(1, 'days'), '1 day');
   assert.equal(f(4.25, 'times'), '4.3 times a year');
+});
+
+test('components used in builds count as demand, so they get reorder advice instead of "not selling"', () => {
+  const data = shop({ products: [
+    { id: 1, name: 'Butter', unit: 'kg', cost: 100, price: 0, stock: 3, reorder: 0 },
+    { id: 2, name: 'Croissant', cost: 0, price: 15, stock: 0, reorder: 0, bom: [{ pid: 1, q: 0.05 }] }
+  ] });
+  // Built 60 croissants a week for four weeks: 12 kg of butter in 30 days, about 0.4 kg a day.
+  ['2026-10-20', '2026-10-27', '2026-11-03', '2026-11-10'].forEach(d => {
+    data.products[0].stock += 3;
+    assert.ok(!L.buildProduct(data, data.products[1], 60, d).error);
+  });
+  const r = run(data);
+  const low = rec(r, 'Butter runs out');
+  assert.ok(low, 'butter should be flagged as running low');
+  assert.match(low.detail, /You used 12 kg in builds in the last 30 days\. Order about \d+ kg more/);
+  assert.ok(!rec(r, 'Butter is not selling'));
+  assert.ok(!rec(r, 'Butter sells for less'));  // no selling price: no pricing advice
+});
+
+test('something with a recipe that is running low says to make more, not to order it', () => {
+  const data = shop({ products: [
+    { id: 1, name: 'Butter', unit: 'kg', cost: 100, price: 0, stock: 100, reorder: 0 },
+    { id: 2, name: 'Croissant', cost: 5, price: 15, stock: 3, reorder: 0, bom: [{ pid: 1, q: 0.05 }] }
+  ] });
+  for (let d = 1; d <= 9; d++) sell(data, '2026-11-0' + d, [item(2, 0, 15, 5, 'Croissant')]);
+  data.orders.forEach(o => o.items[0].q = 10);   // ten a day, three left
+  const low = rec(run(data), 'Croissant runs out');
+  assert.ok(low);
+  assert.match(low.detail, /Make about \d+ more/);
+  assert.equal(low.action.kind, 'make');
 });

@@ -91,6 +91,13 @@ function runInsightAction(a) {
       ? `${a.value} × ${p.name} added to a new purchase order. Choose the supplier, check the cost and save it.`
       : `${a.value} × ${p.name} is waiting on a new purchase order. Add a supplier first.`, false);
   }
+  if (a.kind === 'make') {
+    ui.tab = 'prod';
+    openBom(a.ref);
+    const box = document.querySelector('#build-qty');
+    if (box) box.value = a.value;
+    return;
+  }
   if (a.kind === 'customer') { ui.tab = 'cust'; return selectCustomer(a.ref, true); }
   if (a.kind === 'order') return showOrder(a.ref);
   if (a.kind === 'product') { ui.tab = 'prod'; return openStockHistory(a.ref); }

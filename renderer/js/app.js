@@ -95,6 +95,7 @@ document.addEventListener('keydown', e => {
   else if (ui.creditForm) toggleCreditForm(false);
   else if (ui.tab === 'ord' && ui.openOrderId) closeOrder();
   else if (ui.tab === 'prod' && ui.historyProductId) closeStockHistory();
+  else if (ui.tab === 'prod' && ui.bomProductId) closeBom();
   else hideToast();
 });
 

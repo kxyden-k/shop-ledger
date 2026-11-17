@@ -157,7 +157,7 @@ function creditSection(o) {
   const lines = creditableItems(db, o);
   if (!lines.some(l => l.left > 0)) return list + '<p class="empty">Everything on this order has been credited.</p>';
   if (!ui.creditForm) return list + `<div class="row"><button class="btn alt" id="credit-new" onclick="toggleCreditForm(true)">New credit note</button></div>`;
-  const rows = lines.map(l => `<tr><td>${esc(l.n)}</td><td class="n">${l.q}</td><td class="n">${money(l.p)}</td><td class="n">${l.left}</td><td class="n"><input id="cr-q-${l.line}" type="number" min="0" max="${l.left}" step="1" value="0" aria-label="Quantity of ${esc(l.n)} to credit"${l.left ? '' : ' disabled'}></td></tr>`).join('');
+  const rows = lines.map(l => `<tr><td>${esc(l.n)}</td><td class="n">${l.q}</td><td class="n">${money(l.p)}</td><td class="n">${l.left}</td><td class="n"><input id="cr-q-${l.line}" type="number" min="0" max="${l.left}" step="any" value="0" aria-label="Quantity of ${esc(l.n)} to credit"${l.left ? '' : ' disabled'}></td></tr>`).join('');
   return list + `<form onsubmit="saveCredit();return false" style="margin-top:10px">
   ${table([th('Item'), thNum('Sold'), thNum('Price'), thNum('Can credit'), thNum('Credit now')], rows)}
   <div class="row" style="margin-top:8px"><label>Reason<input id="cr-reason" placeholder="e.g. Returned, damaged in transit" style="width:280px"></label>
@@ -233,7 +233,7 @@ function newOrderCard() {
   <div id="oc-hint" class="empty" style="margin:4px 0" aria-live="polite">${esc(customerHint())}</div>
   <form class="row" style="margin-top:10px" onsubmit="addDraftItem();return false">
   <label>Product<select id="ol-prod" onchange="onDraftProductChange(this.value)">${productOptions}</select></label>
-  <label>Qty<input id="ol-qty" type="number" min="1" value="1" style="width:70px"></label>
+  <label>Qty<input id="ol-qty" type="number" min="0" step="any" value="1" style="width:80px"></label>
   <label>Unit price<input id="ol-price" type="number" step="0.01" min="0" value="${inStock[0] ? inStock[0].price : ''}" style="width:100px"></label>
   <button class="btn alt"${inStock.length ? '' : ' disabled'}>Add item</button></form>
   ${itemTable}
@@ -263,13 +263,13 @@ function onDraftProductChange(id) {
 function addDraftItem() {
   const p = findProduct(+$('#ol-prod').value), qty = +$('#ol-qty').value, price = +$('#ol-price').value;
   if (!p) return showError('Choose a product.', '#ol-prod');
-  if (!(qty >= 1)) return showError('Enter a quantity of at least 1.', '#ol-qty');
-  const alreadyAdded = sumOf(ui.draft.items.filter(i => i.pid === p.id), i => i.q);
-  if (alreadyAdded + qty > p.stock) {
-    const left = p.stock - alreadyAdded;
+  if (!(qty > 0)) return showError('Enter a quantity above 0.', '#ol-qty');
+  const alreadyAdded = roundQty(sumOf(ui.draft.items.filter(i => i.pid === p.id), i => i.q));
+  if (roundQty(alreadyAdded + qty) > p.stock) {
+    const left = roundQty(p.stock - alreadyAdded);
     return showError(`Only ${p.stock} of ${p.name} in stock` + (alreadyAdded ? `, and ${alreadyAdded} are already in this order.` : '.') + (left > 0 ? ` You can add ${left} more.` : ''), '#ol-qty');
   }
-  ui.draft.items.push({ pid: p.id, n: p.name, q: qty, p: price, c: p.cost });
+  ui.draft.items.push({ pid: p.id, n: p.name, q: roundQty(qty), p: price, c: p.cost });
   ui.afterRender = { focus: '#ol-prod' }; // ready for the next item
   render();
 }
