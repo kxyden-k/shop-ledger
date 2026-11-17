@@ -24,7 +24,7 @@ function customersScreen() {
   ${stat('Average lifetime value', money(all.length ? totalSpent / all.length : 0))}
   ${stat('Awaiting payment', money(awaiting))}</div>
   ${agedDebtCard()}
-  ${card('Top customers by revenue', topBody)}
+  ${card('Top customers by sales' + exclTax(), topBody)}
   ${card('All customers', `<div class="row" style="margin-bottom:8px">${searchBox('cust-search', ui.customerSearch, 'setCustomerSearch', 'Name or email')}
   <label>Sort by<select id="cust-sort" onchange="setCustomerSort(this.value)">${sortOptions}</select></label></div><div id="ctab">${customerTable()}</div>`)}${customerDetail()}`;
 }
@@ -57,7 +57,7 @@ function customerTable() {
     .filter(c => !q || (c.name + ' ' + c.email).toLowerCase().includes(q))
     .sort(CUSTOMER_SORTS[ui.customerSort].compare);
   if (!rows.length) return emptyNote('No customers match.');
-  const headers = [th('Customer'), th('Email'), thNum('Orders'), thNum('Spent'), thNum('Profit'), thNum('Avg order'), th('Last order'), thNum('Awaiting payment')];
+  const headers = [th('Customer'), th('Email'), thNum('Orders'), thNum('Sales' + exclTax()), thNum('Profit'), thNum('Avg order'), th('Last order'), thNum('Awaiting payment')];
   return table(headers, rows.map(c => {
     const open = ui.selectedCustomer === c.key;
     return `<tr class="${open ? 'selected' : ''}"><td><button class="btn alt sm" data-k="${esc(c.key)}" data-focus="cust-${esc(c.key)}" aria-expanded="${open}" onclick="selectCustomer(this.dataset.k)">${esc(c.name)}</button></td><td>${esc(c.email || '–')}</td><td class="n">${c.orderCount}</td><td class="n">${money(c.spent)}</td><td class="n ${c.profit < 0 ? 'neg' : ''}">${money(c.profit)}</td><td class="n">${money(c.spent / c.orderCount)}</td><td>${c.lastOrder}</td><td class="n">${c.awaitingPayment ? money(c.awaitingPayment) : '–'}</td></tr>`;
@@ -68,7 +68,7 @@ function customerDetail() {
   const c = ui.selectedCustomer && customers().find(x => x.key === ui.selectedCustomer);
   if (!c) return '';
   const favourites = favouriteProducts(c).map(f => esc(f.name) + ' (' + f.units + ')').join(', ');
-  const rows = c.orders.slice().reverse().map(o => `<tr class="${isCancelled(o) ? 'cancelled' : ''}"><td>#${o.no}</td><td>${o.date}</td><td class="items" title="${esc(itemSummary(o))}">${esc(itemSummary(o))}</td><td class="n">${money(orderRevenue(o))}</td><td>${o.status}</td><td>${paymentTag(o)}</td><td>${esc(o.invoiceNo || '–')} <button class="btn alt sm" aria-label="Open order #${o.no}" onclick="showOrder(${o.id})">Open</button></td></tr>`).join('');
+  const rows = c.orders.slice().reverse().map(o => `<tr class="${isCancelled(o) ? 'cancelled' : ''}"><td>#${o.no}</td><td>${o.date}</td><td class="items" title="${esc(itemSummary(o))}">${esc(itemSummary(o))}</td><td class="n">${money(isCancelled(o) ? 0 : orderTotals(o).total)}</td><td>${o.status}</td><td>${paymentTag(o)}</td><td>${esc(o.invoiceNo || '–')} <button class="btn alt sm" aria-label="Open order #${o.no}" onclick="showOrder(${o.id})">Open</button></td></tr>`).join('');
   return card(esc(c.name), `<p>${esc(c.email || 'No email on file')} · customer since ${c.firstOrder} · most bought: ${favourites || '–'} · margin ${percent(c.profit, c.spent)} · ${c.balance > 0 ? '<b class="neg">owes ' + money(c.balance) + '</b>' : c.balance < 0 ? '<b>in credit by ' + money(-c.balance) + '</b>' : 'nothing owed'}</p>
   ${table([th('Order'), th('Date'), th('Items'), thNum('Total'), th('Status'), th('Payment'), th('Invoice')], rows)}
   <div class="row" style="margin-top:10px"><label>Statement covers<select id="st-from">${options(statementRanges(), '')}</select></label>

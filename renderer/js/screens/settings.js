@@ -1,7 +1,30 @@
 // Settings tab: app info, backups, PIN lock, business details, email, currency and raw data.
 
+const SETTINGS_VIEWS = [['business', 'Business'], ['backups', 'Backups'], ['email', 'Email'], ['security', 'Security'], ['data', 'Your data'], ['about', 'About']];
+
 function settingsScreen() {
-  return aboutCard() + backupCard() + securityCard() + businessCard() + emailCard() + currencyCard() + manualDataCard();
+  const sections = {
+    business: () => businessCard() + currencyCard() + appearanceCard(),
+    backups: backupCard, email: emailCard, security: securityCard, data: manualDataCard, about: aboutCard
+  };
+  return subNav(SETTINGS_VIEWS, ui.settingsView, 'setSettingsView') + sections[ui.settingsView]();
+}
+
+function setSettingsView(view) { ui.settingsView = view; ui.confirming = null; render(); }
+
+// ---- appearance ----
+
+const THEMES = [['', 'Same as Windows'], ['light', 'Light'], ['dark', 'Dark']];
+
+function appearanceCard() {
+  return card('Appearance', `<div class="row"><label>Colours<select id="theme" onchange="setTheme(this.value)">${options(THEMES, document.documentElement.dataset.theme || '')}</select></label></div>
+  <p class="empty">Applies to this computer only.</p>`);
+}
+
+function setTheme(theme) {
+  applyTheme(theme);
+  try { localStorage.setItem('theme', theme); } catch (e) { /* not remembered, but still applied now */ }
+  render();
 }
 
 // ---- about ----
@@ -22,20 +45,20 @@ async function checkForUpdates(button) {
 function backupBanner() {
   const b = window.api.backupGet(), canBackUp = b.folder && b.folderOk;
   let warning = '';
-  if (!b.folder) warning = 'Your data is only stored on this computer. Choose a backup folder so a lost or broken computer does not mean lost records.';
+  if (!b.folder) warning = 'Your records are only on this computer. Choose a backup folder so a broken or lost computer doesn\'t lose them.';
   else if (!b.folderOk) warning = 'The backup folder cannot be found. Is the drive or cloud folder connected? Backups are not being saved.';
   else if (b.lastError) warning = 'The last backup failed: ' + b.lastError;
   else if (!b.lastOk) warning = 'No backup has been made yet.';
   else if (Date.now() - b.lastOk > 3 * DAY_MS) warning = 'The last backup was ' + Math.floor((Date.now() - b.lastOk) / DAY_MS) + ' days ago.';
   if (!warning) return '';
   const button = canBackUp ? '<button class="btn sm" onclick="backUpNow(this)">Back up now</button>'
-    : `<button class="btn sm" onclick="openBackupSettings()">Open settings</button>`;
+    : `<button class="btn sm" onclick="openBackupSettings()">Set up backups</button>`;
   return `<div class="msg warnbar"><b>Backup warning:</b> ${esc(warning)} ${button}</div>`;
 }
 
 function openBackupSettings() {
+  ui.settingsView = 'backups';
   goTo('set');
-  $('#backups').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function backupCard() {

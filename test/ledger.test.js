@@ -31,6 +31,29 @@ test('tax is added on top, carved out, or absent', () => {
   assert.equal(L.orderTotals({ items }).total, 200);
 });
 
+test('sales and profit leave out tax that is included in prices', () => {
+  const incl = { items: [item(1, 2, 115, 40)], fee: 5, tax: { rate: 15, incl: true } };
+  assert.equal(L.orderRevenue(incl), 230);             // what the customer is charged
+  assert.ok(Math.abs(L.orderSales(incl) - 200) < 1e-9); // what the shop keeps
+  assert.ok(Math.abs(L.orderProfit(incl) - 115) < 1e-9); // 200 − 80 goods − 5 fee
+  const onTop = { items: [item(1, 2, 100, 40)], tax: { rate: 15, incl: false } };
+  assert.equal(L.orderSales(onTop), 200);               // tax added on top is never sales
+  assert.equal(L.orderProfit(onTop), 120);
+  assert.ok(Math.abs(L.netOfTax(115, { rate: 15, incl: true }) - 100) < 1e-9);
+  assert.equal(L.netOfTax(115, { rate: 15, incl: false }), 115);
+
+  const data = shop({ biz: { taxRate: 15, taxIncl: true } });
+  sell(data, [item(1, 2, 115, 40)]);
+  const s = L.periodSummary(data, 'all', new Date(TODAY));
+  assert.ok(Math.abs(s.revenue - 200) < 1e-9);
+  assert.ok(Math.abs(s.grossProfit - 120) < 1e-9);
+  const [mug] = L.salesByProduct(s.entries);
+  assert.ok(Math.abs(mug.revenue - 200) < 1e-9 && Math.abs(mug.profit - 120) < 1e-9);
+  const [ann] = L.summarizeCustomers(data);
+  assert.ok(Math.abs(ann.spent - 200) < 1e-9);
+  assert.equal(ann.awaitingPayment, 230); // what they owe still includes the tax
+});
+
 test('periods: all, this month, last 30 days', () => {
   const now = new Date('2026-11-16T12:00:00Z');
   assert.ok(L.isInPeriod('2020-01-01', 'all', now));

@@ -1,7 +1,11 @@
 // Products & stock tab: add products, edit them in the table, change all prices at once.
 
+function productsActions() {
+  return formButton('bulkPrice', 'Change all prices', '#bulk', false) + formButton('addProduct', 'Add product', '#f-sku');
+}
+
 function productsScreen() {
-  const addCard = card('Add a product', `<form class="row" onsubmit="addProduct();return false">
+  const addCard = !formOpen('addProduct') ? '' : formCard('addProduct', 'Add a product', `<form class="row" onsubmit="addProduct();return false">
   <label>SKU<input id="f-sku" style="width:90px"></label><label>Name<input id="f-name"></label>
   <label>Cost<input id="f-cost" type="number" step="0.01" min="0" style="width:90px"></label>
   <label>Selling price<input id="f-price" type="number" step="0.01" min="0" style="width:100px"></label>
@@ -9,30 +13,38 @@ function productsScreen() {
   <label>Reorder at<input id="f-re" type="number" min="0" style="width:80px"></label>
   <button class="btn">Add product</button></form>`);
 
-  const bulkCard = card('Change all prices', `<form class="row" onsubmit="changeAllPricesBy();return false">
+  const bulkCard = !formOpen('bulkPrice') ? '' : formCard('bulkPrice', 'Change all prices', `<form class="row" onsubmit="changeAllPricesBy();return false">
   <label>Change by %<input id="bulk" type="number" step="0.1" placeholder="e.g. 5 or -10" style="width:130px"></label>
-  <button class="btn alt">Apply to every product</button></form>`);
+  <button class="btn alt">Apply to every product</button></form>
+  <p class="empty">Raises or lowers every selling price by the same percentage. Old prices are kept in each product's price history.</p>`);
 
-  return stockHistoryPanel() + addCard + bulkCard + card('Products', productList());
+  return stockHistoryPanel() + addCard + bulkCard + card('All products', productList());
 }
 
 function productList() {
-  if (!db.products.length) return emptyNote('No products yet. Add your first one above.');
+  if (!db.products.length) return emptyNote('No products yet. Use "Add product" at the top to add your first one.');
   const q = ui.productSearch.trim().toLowerCase();
   const shown = db.products.filter(p => !q || ((p.sku || '') + ' ' + p.name).toLowerCase().includes(q));
   const search = `<div class="row" style="margin-bottom:8px">${searchBox('prod-search', ui.productSearch, 'setProductSearch', 'Name or SKU')}</div>`;
   if (!shown.length) return search + emptyNote('No products match.');
-  const headers = [th('SKU'), th('Name'), thNum('Cost'), thNum('Price'), thNum('Profit/unit'), thNum('Margin'), thNum('Markup'), thNum('Stock'), thNum('Reorder at'), thNum('Stock value'), th(''), th('')];
+  const headers = [th('SKU'), th('Name'), thNum('Cost'), thNum('Price'), thNum('Profit/unit'), thNum('Margin'), thNum('Stock'), thNum('Reorder at'), thNum('Stock value'), th('')];
   return search + table(headers, shown.map(productRow).join(''))
-    + '<p class="empty">Edit any cell and it saves straight away. Shaded rows are at or below their reorder level. Hover a price to see its past values. History lists every sale, purchase, return and hand edit of stock.</p>';
+    + `<p class="empty">Changes save as soon as you leave a box. Shaded rows are at or below their reorder level. Hover a price to see its earlier prices.${productTaxNote()}</p>`;
+}
+
+// Prices include tax: say that profit and margin are worked out without it.
+function productTaxNote() {
+  const tax = currentTax(db);
+  return tax.rate > 0 && tax.incl ? ` Your prices include ${tax.rate}% tax, so profit and margin are worked out on the price without it.` : '';
 }
 
 function setProductSearch(text) { ui.productSearch = text; render(); }
 
 function productRow(p) {
-  const profit = p.price - p.cost;
-  const margin = p.price ? profit / p.price * 100 : 0;
-  const markup = p.cost ? (profit / p.cost * 100).toFixed(0) + '%' : '–';
+  const sellsFor = netOfTax(p.price, currentTax(db)); // the price without any tax inside it
+  const profit = sellsFor - p.cost;
+  const margin = sellsFor ? profit / sellsFor * 100 : 0;
+  const markup = p.cost ? 'Markup ' + (profit / p.cost * 100).toFixed(0) + '%' : '';
   const priceHistory = (p.h || []).map(h => h.d + ': ' + db.cur + h.o).join('\n');
   const name = esc(p.name);
   // data-focus lets render() put the cursor back in the same cell; aria-label names the cell for screen readers.
@@ -47,13 +59,11 @@ function productRow(p) {
     ${numberCell('cost', 'Cost', 'step="0.01" min="0"')}
     ${numberCell('price', 'Price', 'step="0.01" min="0"', ` title="${esc(priceHistory || 'No price changes yet')}"`)}
     <td class="n ${profit < 0 ? 'neg' : ''}">${money(profit)}</td>
-    <td class="n ${margin < 10 ? 'neg' : 'pos'}">${margin.toFixed(1)}%</td>
-    <td class="n">${markup}</td>
+    <td class="n ${margin < 10 ? 'neg' : 'pos'}" title="${markup}">${margin.toFixed(1)}%</td>
     ${numberCell('stock', 'Stock', 'step="1"')}
     ${numberCell('reorder', 'Reorder level', 'step="1" min="0"')}
     <td class="n">${money(p.stock * p.cost)}</td>
-    <td><button type="button" class="btn alt sm" data-focus="hist-${p.id}" aria-label="Stock history of ${name}" onclick="openStockHistory(${p.id})">History</button></td>
-    <td>${deleteButton('p' + p.id, p.name, `deleteProduct(${p.id})`)}</td></tr>`;
+    <td><div class="actions"><button type="button" class="btn alt sm" data-focus="hist-${p.id}" aria-label="Stock history of ${name}" onclick="openStockHistory(${p.id})">History</button>${deleteButton('p' + p.id, p.name, `deleteProduct(${p.id})`)}</div></td></tr>`;
 }
 
 function addProduct() {

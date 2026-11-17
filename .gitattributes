@@ -1,0 +1,3 @@
+# Copies of browser libraries (see tools/vendor.js). Kept byte for byte so test/vendor.test.js
+# can compare them with node_modules on any machine, whatever its line-ending settings.
+renderer/vendor/** -text

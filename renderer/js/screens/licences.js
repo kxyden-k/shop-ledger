@@ -7,16 +7,21 @@ const licencesAvailable = () => !!(window.api.licences && window.api.licences.av
 // Loaded from the main process when the tab opens; null until then.
 let licenceState = null;   // {tokens, unpublished}
 let issuedToken = null;    // {name, token}: the token just issued, shown once so it can be copied
+let licencesLoading = false; // a redraw while loading must not start a second load
 
 async function loadLicences() {
-  const result = await window.api.licences.list();
+  if (licencesLoading) return;
+  licencesLoading = true;
+  const result = await whileBusy(null, 'Loading licences…', () => window.api.licences.list());
+  licencesLoading = false;
+  if (!result) return;
   if (!result.ok) return showError(result.msg);
   licenceState = result;
   render();
 }
 
 function licencesScreen() {
-  if (!licenceState) { loadLicences(); return card('Licences', emptyNote('Loading…')); }
+  if (!licenceState) { loadLicences(); return card('Issued licences', emptyNote('Loading licences…')); }
   const date = ms => ms ? new Date(ms).toISOString().slice(0, 10) : '';
   const tones = { active: 'good', expired: 'warn', revoked: 'bad' };
   const tokens = licenceState.tokens, counts = s => tokens.filter(t => t.status === s).length;
@@ -48,7 +53,8 @@ async function issueLicence() {
   const name = $('#lic-name').value.trim(), days = $('#lic-days').value;
   if (!name) return showError('Enter the customer name.', '#lic-name');
   if (days && !(+days >= 0)) return showError('Days must be a number, or empty for no expiry.', '#lic-days');
-  const result = await window.api.licences.issue({ name, days: +days || 0 });
+  const result = await whileBusy(null, 'Issuing…', () => window.api.licences.issue({ name, days: +days || 0 }));
+  if (!result) return;
   if (!result.ok) return showError(result.msg);
   issuedToken = { name, token: result.token };
   licenceState = null;
@@ -63,7 +69,8 @@ function copyIssuedToken() {
 
 async function setLicenceRevoked(id, revoked) {
   if (revoked && !confirmed('lic' + id)) return;
-  const result = await window.api.licences.revoke({ id, revoked });
+  const result = await whileBusy(null, 'Saving…', () => window.api.licences.revoke({ id, revoked }));
+  if (!result) return;
   if (!result.ok) return showError(result.msg);
   licenceState = null;
   showMessage(result.msg);

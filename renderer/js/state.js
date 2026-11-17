@@ -21,6 +21,9 @@ const ui = {
   purchaseDraft: emptyDraftPurchase(),
   historyProductId: null,   // product whose stock history is open
   report: { id: 'pnl', preset: 'year', from: '', to: '' },
+  insightsPeriod: '90',     // Insights tab: number of days, 'year' or 'lastYear'
+  settingsView: 'business', // Settings tab section
+  forms: {},                // "add" forms the user opened or closed, see formOpen()
   productSearch: '',
   orderSearch: '',
   orderStatusFilter: '',    // '' shows every status
@@ -40,6 +43,7 @@ const findOrder = id => db.orders.find(o => o.id === id);
 const customers = () => summarizeCustomers(db);
 
 const money = v => fmtMoney(db.cur, v);
+const exclTax = () => currentTax(db).rate > 0 ? ' (excl. tax)' : '';
 
 // Forget anything on screen that points at records, after the data is replaced or erased.
 function resetScreens() {
@@ -62,6 +66,40 @@ function renderSoon() {
   renderQueued = true;
   setTimeout(() => { renderQueued = false; render(); });
 }
+
+// ---- "add" forms ----
+// Forms such as "Add a product" open from a button in the page header and stay open while you add
+// several things. Until the user opens or closes one, it is open only while its list is empty.
+const FORM_OPEN_BY_DEFAULT = {
+  addProduct: () => !db.products.length,
+  newOrder: () => !db.orders.length || ui.draft.items.length > 0,
+  newPurchase: () => ui.purchaseDraft.items.length > 0,
+  addSupplier: () => !db.suppliers.length,
+  addExpense: () => !db.expenses.length
+};
+const formOpen = key => key in ui.forms ? ui.forms[key] : !!(FORM_OPEN_BY_DEFAULT[key] && FORM_OPEN_BY_DEFAULT[key]());
+
+// focus: the field to start in when the form opens.
+function toggleForm(key, focus) {
+  ui.forms[key] = !formOpen(key);
+  if (ui.forms[key]) ui.afterRender = { focus, scroll: '#form-' + key };
+  render();
+}
+
+// The header button that opens and closes a form.
+const formButton = (key, label, focus, primary = true) =>
+  `<button class="btn${primary ? '' : ' alt'}" data-focus="act-${key}" aria-expanded="${formOpen(key)}" aria-controls="form-${key}" onclick="toggleForm('${key}','${focus}')">${label}</button>`;
+
+// The card a form sits in, with a Close button that does the same as the header button.
+const formCard = (key, title, body) =>
+  card(title + `<button type="button" class="btn alt sm close-form" aria-label="Close ${title}" onclick="toggleForm('${key}')">Close</button>`, body, 'form-' + key);
+
+// Colours: '' follows Windows, or 'light' / 'dark'. Remembered on this computer only.
+function applyTheme(theme) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+}
+try { applyTheme(localStorage.getItem('theme') || ''); } catch (e) { /* storage unavailable: follow Windows */ }
 
 // ---- notices ----
 // Shown in a corner toast so they are seen however far down the page you are.
@@ -99,8 +137,33 @@ function showResult(result) {
   else { render(); showError(result.msg); }
 }
 
-// Disables the clicked button while slow work runs (email, PDF, backups), so it can't be sent twice.
-// Returns the work's result, or undefined if it was already running or failed.
+// ---- loading bar ----
+// A thin animated bar across the top of the window while the app waits on slow work (PDFs, email,
+// backups, updates). It only appears if the work takes longer than a moment, so quick actions don't
+// flicker, and then stays long enough to be seen. Several jobs at once share one bar.
+const BUSY_SHOW_AFTER_MS = 150, BUSY_MIN_VISIBLE_MS = 400;
+let busyJobs = 0, busyTimer = null, busyShownAt = 0;
+
+function startBusy(label = 'Working') {
+  if (busyJobs++ > 0) return;
+  clearTimeout(busyTimer);
+  busyTimer = setTimeout(() => {
+    const bar = $('#busy-bar');
+    bar.hidden = false;
+    bar.setAttribute('aria-label', label + '…');
+    busyShownAt = Date.now();
+  }, BUSY_SHOW_AFTER_MS);
+}
+
+function endBusy() {
+  if (busyJobs === 0 || --busyJobs > 0) return;
+  clearTimeout(busyTimer);
+  const shownFor = busyShownAt ? Date.now() - busyShownAt : BUSY_MIN_VISIBLE_MS;
+  busyTimer = setTimeout(() => { if (!busyJobs) { $('#busy-bar').hidden = true; busyShownAt = 0; } }, Math.max(0, BUSY_MIN_VISIBLE_MS - shownFor));
+}
+
+// Disables the clicked button while slow work runs (email, PDF, backups), so it can't be sent twice,
+// and shows the loading bar. Returns the work's result, or undefined if it was already running or failed.
 async function whileBusy(button, busyLabel, work) {
   if (button) {
     if (button.disabled) return;
@@ -108,11 +171,13 @@ async function whileBusy(button, busyLabel, work) {
     button.dataset.label = button.textContent;
     button.textContent = busyLabel;
   }
+  startBusy(busyLabel ? busyLabel.replace(/…$/, '') : 'Working');
   try {
     return await work();
   } catch (e) {
     showError('Something went wrong: ' + e.message);
   } finally {
+    endBusy();
     if (button && button.isConnected) { button.disabled = false; button.textContent = button.dataset.label; }
   }
 }

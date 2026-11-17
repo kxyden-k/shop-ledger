@@ -26,7 +26,7 @@ function sendPanel() {
   const s = ui.send;
   if (!s) return '';
   const missingBusiness = db.biz.name.trim() ? ''
-    : `<div class="msg warnbar">Add your business name in Settings first. It is printed at the top of every document. <button type="button" class="btn sm" onclick="goTo('set')">Open settings</button></div>`;
+    : `<div class="msg warnbar">Add your business name in Settings first. It is printed at the top of every document. <button type="button" class="btn sm" onclick="ui.settingsView='business';goTo('set')">Open settings</button></div>`;
   return card(s.title, `${missingBusiness}
   <div class="row"><label>Send to<input id="send-to" type="email" value="${esc(s.to || '')}" style="width:260px"></label>
   <label>Subject<input id="send-subject" placeholder="Filled in for you if left empty" style="width:300px"></label></div>

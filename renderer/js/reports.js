@@ -4,7 +4,7 @@
 //   total (optional) is one more row, shown in bold.
 
 // In the browser ledger.js is already loaded as globals; in Node tests it has to be pulled in.
-if (typeof require !== 'undefined') Object.assign(globalThis, require('./ledger'));
+if (typeof require !== 'undefined') Object.assign(globalThis, require('./ledger'), require('./insights'));
 
 const colText = label => ({ label, type: 'text' });
 const colMoney = label => ({ label, type: 'money' });
@@ -54,7 +54,7 @@ function taxReport(data, from, to) {
 }
 
 function salesByProductReport(data, from, to) {
-  const columns = [colText('Product'), colNum('Units sold'), colMoney('Revenue'), colMoney('Cost'), colMoney('Profit'), { label: 'Margin', type: 'pct' }];
+  const columns = [colText('Product'), colNum('Units sold'), colMoney('Sales excl. tax'), colMoney('Cost'), colMoney('Profit'), { label: 'Margin', type: 'pct' }];
   const rows = salesByProduct(salesEntries(data, d => inRange(d, from, to)))
     .map(p => [p.name, p.units, round2(p.revenue), round2(p.cost), round2(p.profit), p.revenue ? p.profit / p.revenue * 100 : null]);
   const total = totalRow(columns, rows);
@@ -69,10 +69,10 @@ function salesByCustomerReport(data, from, to) {
     const key = customerKey(e);
     const c = byKey[key] = byKey[key] || { name: names[key] || e.cust || e.email || 'Walk-in customer', orders: 0, revenue: 0, profit: 0 };
     if (!e.isCredit) c.orders++;
-    c.revenue += orderRevenue(e);
+    c.revenue += orderSales(e);
     c.profit += orderProfit(e);
   });
-  const columns = [colText('Customer'), colNum('Orders'), colMoney('Revenue'), colMoney('Profit')];
+  const columns = [colText('Customer'), colNum('Orders'), colMoney('Sales excl. tax'), colMoney('Profit')];
   const rows = Object.values(byKey).sort((a, b) => b.revenue - a.revenue).map(c => [c.name, c.orders, round2(c.revenue), round2(c.profit)]);
   return { title: 'Sales by customer', columns, rows, total: totalRow(columns, rows), note: '' };
 }
@@ -128,12 +128,22 @@ function stockValuation(data, from, to, today) {
   return { title: 'Stock valuation', columns, rows, total, note: 'As at ' + today + '. The dates above do not apply.', asAt: true };
 }
 
+// The Insights tab's ratios as a table for the accountant. With no dates, from the first record to today.
+function keyRatios(data, from, to, today) {
+  const start = from || firstRecordDate(data) || today, end = to || today;
+  const result = computeInsights(data, { from: start, to: end > start ? end : start, today });
+  const columns = [colText('Area'), colText('Ratio'), colText('Value'), colText('Target'), colText('Status')];
+  const rows = result.ratios.map(r => [r.group, r.label, formatRatio(r, data.cur), r.target, STATUS_LABEL[r.status]]);
+  return { title: 'Key ratios', columns, rows, note: `From ${start} to ${end}. Figures exclude tax. The Insights tab explains each ratio and lists recommendations.` };
+}
+
 const REPORTS = {
   pnl: profitAndLoss, tax: taxReport, products: salesByProductReport, customers: salesByCustomerReport,
   orders: orderListReport, payments: paymentsReport, debtors: agedDebtorsReport,
-  expenseCats: expensesByCategory, expenses: expenseList, stock: stockValuation
+  expenseCats: expensesByCategory, expenses: expenseList, stock: stockValuation, ratios: keyRatios
 };
 const REPORT_NAMES = [
+  ['ratios', 'Key ratios'],
   ['pnl', 'Profit and loss'], ['tax', 'Tax collected on sales'], ['products', 'Sales by product'], ['customers', 'Sales by customer'],
   ['orders', 'Order list'], ['payments', 'Payments received'], ['debtors', 'Who owes you (aged debtors)'],
   ['expenseCats', 'Expenses by category'], ['expenses', 'Expense list'], ['stock', 'Stock valuation']
@@ -170,6 +180,6 @@ function presetRange(preset, today) {
 if (typeof module !== 'undefined') {
   module.exports = {
     profitAndLoss, taxReport, salesByProductReport, salesByCustomerReport, expensesByCategory, expenseList, paymentsReport,
-    orderListReport, agedDebtorsReport, stockValuation, REPORT_NAMES, buildReport, formatCell, reportToRows, presetRange
+    orderListReport, agedDebtorsReport, stockValuation, keyRatios, REPORT_NAMES, buildReport, formatCell, reportToRows, presetRange
   };
 }

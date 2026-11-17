@@ -117,3 +117,19 @@ When you run the app from source (`npm start`) on the machine that has `keys/pri
 - It never appears in installed copies: the installer contains neither `tools/` nor `keys/`, and the app only loads this code when it is not packaged.
 - A newly issued token is shown once with a Copy button. It is not stored, only its id and name are (`keys/issued.json`).
 - Revoking or restoring changes `access/revoked.json` on your machine. It takes effect when that file reaches GitHub: use the "Commit and push now" button in the red bar, or commit and push it yourself.
+
+## 14. Insights, and the move to Preact (added in 2.1.0)
+**Insights tab.** Accounting ratios (margins, break-even, stock days and turnover, debtor days, days to pay, customer concentration, returns, growth) measured against the owner's targets, plus recommendations: prices below cost or target margin, stock running out or not selling, overdue debts, refunds due, expiring quotes. Each recommendation shows the numbers behind it and a button to act on it. Changing a price from there needs a second click and is kept in the price history.
+- Targets are set on the Insights tab ("Your targets") and saved in `data.json` as `targets`. Older versions ignore the field, so no data upgrade was needed.
+- Figures exclude tax. The rules are in `renderer/js/insights.js` and tested in `test/insights.test.js`. To change when something is flagged, change the rule there and its test.
+- Reports > Key ratios exports the same ratios to CSV or PDF for an accountant.
+- They are rules of thumb, not financial advice. The screen says so.
+
+**Preact.** New screens are written as Preact components with htm (see `renderer/js/preact.mjs` and `renderer/js/screens/insights.mjs`). Preact keeps the cursor and scroll position itself and escapes every value, so these screens need none of `render()`'s focus handling or `esc()`. The older string screens still work and are being moved over one tab at a time; `app.js` runs both kinds side by side.
+- The libraries are copied into `renderer/vendor` and loaded through the import map in `index.html`. Nothing is downloaded at run time and there is no build step.
+- To upgrade them: `npm install --save-dev --save-exact --ignore-scripts preact@<version> htm@<version>`, then `node tools/vendor.js`, then run the app and `npm test` (which fails if the copies and the installed versions differ). Commit `renderer/vendor` with `package.json` and `package-lock.json`.
+- A component screen registers itself with `registerComponentScreen(key, mount, unmount)` from its module, and its tab in `app.js` has `component: true`. If a module fails to load, that tab shows a message and the rest of the app keeps working.
+
+**Tax in the figures (from 2.1.0).** Anything about how the business is doing (dashboard sales and profit, product margins, charts, customer sales, reports, insights) leaves tax out, because tax collected belongs to the tax authority. Anything about what a customer is charged or owes (order totals, balances, invoices, statements) includes it. Before 2.1.0, shops whose prices include tax saw sales and profit on the Dashboard and Products tab with the tax still in, so those figures drop after updating. Expect questions, and point to this rule. The rule lives at the top of `renderer/js/ledger.js` (`orderSales`, `orderProfit`, `netOfTax`).
+
+**Loading bar.** A thin bar across the top of the window shows while the app waits on slow work (PDFs, email, backups, updates, licences). Wrap any new slow call in `whileBusy()` (or `startBusy()`/`endBusy()`) and it appears automatically. It only shows for work that takes longer than 150ms.

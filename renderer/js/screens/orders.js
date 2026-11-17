@@ -8,26 +8,41 @@ function ordersScreen() {
   const nav = subNav(ORDER_VIEWS, ui.ordersView, 'setOrdersView');
   if (ui.ordersView === 'quotes') return nav + quotesCard();
   if (ui.ordersView === 'credits') return nav + creditsCard();
-  return nav + orderPanel() + newOrderCard() + orderListCard();
+  return nav + orderPanel() + (formOpen('newOrder') ? newOrderCard() : '') + orderListCard();
 }
 
 function setOrdersView(view) { ui.ordersView = view; ui.confirming = null; render(); }
+
+function ordersActions() {
+  if (ui.ordersView === 'credits') return '';
+  if (ui.ordersView === 'quotes') return '<button class="btn" onclick="startNewOrder()">New quote</button>';
+  return formButton('newOrder', 'New order or quote', '#oc-name');
+}
+
+// Opens the order form from anywhere, e.g. the Quotes view.
+function startNewOrder() {
+  ui.tab = 'ord';
+  ui.ordersView = 'orders';
+  ui.forms.newOrder = true;
+  ui.afterRender = { focus: '#oc-name', scroll: '#form-newOrder' };
+  render();
+}
 
 // ---- order list ----
 
 const orderSearchText = o => ['#' + o.no, o.cust, o.email, o.invoiceNo || '', itemSummary(o)].join(' ').toLowerCase();
 
 function orderListCard() {
-  if (!db.orders.length) return card('Orders', emptyNote('No orders yet. Orders you save above appear here.'));
+  if (!db.orders.length) return card('All orders', emptyNote('No orders yet. Orders you save appear here.'));
   const q = ui.orderSearch.trim().toLowerCase();
   const shown = db.orders.filter(o => (!ui.orderStatusFilter || o.status === ui.orderStatusFilter) && (!q || orderSearchText(o).includes(q)));
   const statusOptions = options([['', 'All'], ...ORDER_STATUSES.map(s => [s, s])], ui.orderStatusFilter);
   const filters = `<div class="row" style="margin-bottom:8px">${searchBox('ord-search', ui.orderSearch, 'setOrderSearch', 'Customer, number, invoice or item', 280)}
   <label>Status<select id="ord-status" onchange="setOrderStatusFilter(this.value)">${statusOptions}</select></label></div>`;
-  if (!shown.length) return card('Orders', filters + emptyNote('No orders match.'));
-  const headers = [th('No.'), th('Date'), th('Customer'), th('Items'), thNum('Revenue'), thNum('Costs'), thNum('Profit'), thNum('Margin'), th('Status'), th('Payment'), th('')];
-  return card('Orders', filters + table(headers, shown.slice().reverse().map(orderRow).join(''))
-    + '<p class="empty">Open an order to record payments, send its invoice or issue a credit note. Cancelled orders are greyed out and don\'t count towards totals.</p>');
+  if (!shown.length) return card('All orders', filters + emptyNote('No orders match.'));
+  const headers = [th('Order'), th('Date'), th('Customer'), th('Items'), thNum('Total'), thNum('Profit'), th('Status'), th('Payment'), th('')];
+  return card('All orders', filters + table(headers, shown.slice().reverse().map(orderRow).join(''))
+    + '<p class="empty">Cancelled orders are greyed out and don\'t count towards totals. Total is what the customer pays. Profit leaves out tax; hover it to see the figures behind it.</p>');
 }
 
 function setOrderSearch(text) { ui.orderSearch = text; render(); }
@@ -43,15 +58,16 @@ function paymentTag(o) {
 }
 
 function orderRow(o) {
-  const profit = orderProfit(o), revenue = orderRevenue(o), items = itemSummary(o);
+  const profit = orderProfit(o), sales = orderSales(o), charged = orderTotals(o).total, items = itemSummary(o);
   const statusSelect = `<select data-focus="status-${o.id}" aria-label="Status of order #${o.no}" onchange="setOrderStatus(${o.id},this.value)">${ORDER_STATUSES.map(s => `<option ${o.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
   return `<tr class="${isCancelled(o) ? 'cancelled' : ''}${ui.openOrderId === o.id ? ' selected' : ''}">
-  <td>#${o.no}</td><td>${o.date}</td><td>${esc(o.cust || '–')}</td>
+  <td><b>#${o.no}</b>${o.invoiceNo ? `<div class="sub">${esc(o.invoiceNo)}</div>` : ''}</td><td>${o.date}</td>
+  <td>${o.cust ? esc(o.cust) : '<span class="sub">Walk-in</span>'}</td>
   <td class="items" title="${esc(items)}">${esc(items)}</td>
-  <td class="n">${money(revenue)}</td><td class="n">${money(orderCost(o) + orderFee(o))}</td>
-  <td class="n ${signClass(profit)}">${money(profit)}</td><td class="n">${percent(profit, revenue)}</td>
+  <td class="n">${money(charged)}</td>
+  <td class="n" title="Sales${exclTax()} ${money(sales)}, goods ${money(orderCost(o))}${orderFee(o) ? ', fees ' + money(orderFee(o)) : ''}"><span class="${signClass(profit)}">${money(profit)}</span><div class="sub">${percent(profit, sales)} margin</div></td>
   <td>${statusSelect}</td><td>${paymentTag(o)}</td>
-  <td>${o.invoiceNo ? esc(o.invoiceNo) + ' ' : ''}<button class="btn alt sm" data-focus="open-${o.id}" aria-label="Open order #${o.no}" onclick="openOrder(${o.id})">Open</button></td></tr>`;
+  <td><button class="btn alt sm" data-focus="open-${o.id}" aria-label="Open order #${o.no}" onclick="openOrder(${o.id})">Open</button></td></tr>`;
 }
 
 function setOrderStatus(id, status) {
@@ -207,7 +223,7 @@ function newOrderCard() {
     : inStock.length ? 'Add items to build the order.' : 'Add products with stock before creating an order.';
   const none = draft.items.length ? '' : ' disabled';
 
-  return card('New order or quote', `<div class="row">
+  return formCard('newOrder', 'New order or quote', `<div class="row">
   <label>Customer<input id="oc-name" list="cl-names" autocomplete="off" value="${esc(draft.cust)}" oninput="onDraftCustomerInput('name',this.value)"></label>
   <label>Customer email<input id="oc-email" type="email" list="cl-emails" autocomplete="off" value="${esc(draft.email)}" oninput="onDraftCustomerInput('email',this.value)" style="width:220px"></label>
   <label>Date<input id="oc-date" type="date" value="${draft.date}" oninput="ui.draft.date=this.value"></label>
@@ -226,10 +242,11 @@ function newOrderCard() {
   <p class="empty">An order takes the items out of stock straight away. A quote doesn't touch stock until you turn it into an order.</p>`);
 }
 
+// The customer's total (with tax), then the shop's profit and margin (without it).
 function draftSummary() {
-  const revenue = orderRevenue(ui.draft), profit = orderProfit(ui.draft);
-  const charged = orderTotals({ items: ui.draft.items, tax: currentTax(db) });
-  return `Total ${money(revenue)}${charged.total !== revenue ? ' + tax = ' + money(charged.total) : ''} · profit ${money(profit)} · margin ${percent(profit, revenue)}`;
+  const draft = { ...ui.draft, tax: currentTax(db) }, t = orderTotals(draft), profit = orderProfit(draft);
+  const taxPart = t.rate ? ` (${t.rate}% tax ${draft.tax.incl ? 'included' : 'added'}: ${money(t.tax)})` : '';
+  return `Customer pays ${money(t.total)}${taxPart} · profit ${money(profit)} · margin ${percent(profit, t.net)}`;
 }
 
 // Typing updates the summary line in place so the fee box keeps focus.
@@ -313,8 +330,8 @@ const QUOTE_TONES = { Open: 'warn', Accepted: 'good', Declined: '', Expired: 'ba
 
 function quotesCard() {
   if (!db.quotes.length) {
-    return card('Quotes', emptyNote('No quotes yet. Build one in the order form and choose "Save as quote".')
-      + `<div class="row"><button class="btn" onclick="setOrdersView('orders')">New quote</button></div>`);
+    return card('Quotes', emptyNote('No quotes yet. Use "New quote" at the top, add the items, then choose "Save as quote".')
+      + `<div class="row"><button class="btn" onclick="startNewOrder()">New quote</button></div>`);
   }
   const rows = db.quotes.slice().reverse().map(q => {
     const status = quoteStatus(q, today()), open = q.status === 'Open';
@@ -328,7 +345,7 @@ function quotesCard() {
   }).join('');
   return card('Quotes', table([th('No.'), th('Date'), th('Valid until'), th('Customer'), th('Items'), thNum('Total'), th('Status'), th('')], rows)
     + `<p class="empty">"Make order" turns the quote into an order at the quoted prices and takes the stock. Quotes are valid for ${QUOTE_VALID_DAYS} days.</p>
-    <div class="row"><button class="btn alt" onclick="setOrdersView('orders')">New quote</button></div>`);
+`);
 }
 
 const findQuote = id => db.quotes.find(q => q.id === id);

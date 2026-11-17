@@ -34,10 +34,19 @@ const addDays = (date, days) => new Date(new Date(date).getTime() + days * DAY_M
 
 // ---- orders ----
 // These also work on quotes, credit notes and the "New order" draft, which all have items.
+// Tax rule for every figure in the app:
+//   how the business is doing (sales, profit, margins, charts, reports): excluding tax, because tax
+//   collected belongs to the tax authority, not the shop
+//   what a customer is charged or owes (order totals, balances, invoices): including tax
+// orderRevenue is the item prices as charged, which include tax when the shop's prices do.
 const orderRevenue = order => sumOf(order.items, i => i.q * i.p);
 const orderCost = order => sumOf(order.items, i => i.q * i.c);
 const orderFee = order => +order.fee || 0;
-const orderProfit = order => orderRevenue(order) - orderCost(order) - orderFee(order);
+// An amount at the shop's prices with any tax inside it taken out. tax: {rate, incl} (see currentTax).
+const netOfTax = (amount, tax) => tax && tax.incl && tax.rate > 0 ? amount / (1 + tax.rate / 100) : amount;
+// Sales excluding tax. For orders without tax rules (a draft not yet saved) it equals orderRevenue.
+const orderSales = order => orderTotals(order).net;
+const orderProfit = order => orderSales(order) - orderCost(order) - orderFee(order);
 const orderUnits = order => sumOf(order.items, i => i.q);
 const isCancelled = order => order.status === 'Cancelled';
 const nextOrderNumber = orders => orders.reduce((max, o) => Math.max(max, o.no), 0) + 1;
@@ -86,7 +95,7 @@ function periodSummary(data, period, now = new Date()) {
   const entries = salesEntries(data, dateOk);
   const orders = entries.filter(e => !e.isCredit);
   const expenses = data.expenses.filter(e => dateOk(e.date));
-  const revenue = sumOf(entries, orderRevenue);
+  const revenue = sumOf(entries, orderSales);
   const costOfGoods = sumOf(entries, orderCost);
   const fees = sumOf(entries, orderFee);
   const expenseTotal = sumOf(expenses, e => e.amt);
@@ -94,15 +103,15 @@ function periodSummary(data, period, now = new Date()) {
   return { orders, entries, revenue, costOfGoods, fees, grossProfit, expenses: expenseTotal, netProfit: grossProfit - expenseTotal };
 }
 
-// Units, revenue, cost and profit per product name, most profitable first.
+// Units, sales (excluding tax), cost and profit per product name, most profitable first.
 function salesByProduct(entries) {
   const byName = {};
   entries.forEach(o => o.items.forEach(i => {
     const s = byName[i.n] = byName[i.n] || { name: i.n, units: 0, revenue: 0, cost: 0, profit: 0 };
     s.units += i.q;
-    s.revenue += i.q * i.p;
+    s.revenue += i.q * netOfTax(i.p, o.tax);
     s.cost += i.q * i.c;
-    s.profit += i.q * (i.p - i.c);
+    s.profit += i.q * (netOfTax(i.p, o.tax) - i.c);
   }));
   return Object.values(byName).sort((a, b) => b.profit - a.profit);
 }
@@ -113,7 +122,7 @@ function revenueByPeriod(entries, byDay) {
   entries.forEach(o => {
     const key = byDay ? o.date : o.date.slice(0, 7);
     const g = groups[key] = groups[key] || { key, revenue: 0, profit: 0 };
-    g.revenue += orderRevenue(o);
+    g.revenue += orderSales(o);
     g.profit += orderProfit(o);
   });
   return Object.keys(groups).sort().slice(-12).map(k => groups[k]);
@@ -340,7 +349,7 @@ function summarizeCustomers(data) {
     c.balance = round2(c.balance + balance);
     if (isCancelled(o)) return;
     c.orderCount++;
-    c.spent += orderRevenue(o);
+    c.spent += orderSales(o);
     c.profit += orderProfit(o);
     if (balance > 0) c.awaitingPayment = round2(c.awaitingPayment + balance);
     if (!c.firstOrder || o.date < c.firstOrder) c.firstOrder = o.date;
@@ -350,7 +359,7 @@ function summarizeCustomers(data) {
     const c = byKey[keyOfOrder[credit.orderId]];
     if (!c) return;
     const sale = creditAsSale(credit);
-    c.spent += orderRevenue(sale);
+    c.spent += orderSales(sale);
     c.profit += orderProfit(sale);
   });
   return Object.values(byKey)
@@ -419,7 +428,7 @@ const clearRecords = data => ({ ...data, products: [], orders: [], expenses: [],
 if (typeof module !== 'undefined') {
   module.exports = {
     ORDER_STATUSES, PAYMENT_METHODS, DAY_MS, QUOTE_VALID_DAYS, sumOf, round2, fmtMoney, docNumber, addDays,
-    orderRevenue, orderCost, orderFee, orderProfit, orderUnits, isCancelled, nextOrderNumber, itemSummary, currentTax, orderTotals,
+    orderRevenue, orderCost, orderFee, netOfTax, orderSales, orderProfit, orderUnits, isCancelled, nextOrderNumber, itemSummary, currentTax, orderTotals,
     isLowStock, isInPeriod, inRange, creditAsSale, salesEntries, periodSummary, salesByProduct, revenueByPeriod, countByStatus,
     productById, moveStock, stockHistory, setStock, setPrice, changeAllPrices, stockShortage,
     createOrder, changeOrderStatus, orderPaid, creditsOf, orderCredited, orderBalance, paymentState, addPayment, removePayment,

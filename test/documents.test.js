@@ -43,9 +43,12 @@ test('tax report shows tax collected per month', () => {
 
 test('other reports add up', () => {
   const { data } = shop();
-  assert.deepEqual(R.salesByProductReport(data, '', '').rows, [['Mug', 2, 230, 80, 150, 150 / 230 * 100]]);
+  // Prices include 15% tax, so a R115 mug is R100 of sales. Ann paid a R5 fee and returned one mug.
+  const [mug] = R.salesByProductReport(data, '', '').rows;
+  assert.deepEqual(mug.slice(0, 5), ['Mug', 2, 200, 80, 120]);
+  assert.ok(Math.abs(mug[5] - 60) < 1e-9);
   const customers = R.salesByCustomerReport(data, '', '').rows;
-  assert.deepEqual(customers, [['A & <B>', 1, 115, 70], ['Bob', 1, 115, 75]]);
+  assert.deepEqual(customers, [['A & <B>', 1, 100, 55], ['Bob', 1, 100, 60]]);
   assert.deepEqual(R.expensesByCategory(data, '', '').rows, [['Rent', 1, 50], ['Uncategorised', 1, 20]]);
   assert.deepEqual(R.paymentsReport(data, '', '').total.at(-1), 100);
   const orders = R.orderListReport(data, '', '');

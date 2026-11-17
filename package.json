@@ -1,7 +1,7 @@
 {
   "name": "shop-ledger",
   "productName": "Shop Ledger",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Orders, stock, pricing and profit tracker",
   "main": "main.js",
   "author": "Kayden",
@@ -52,6 +52,8 @@
   },
   "devDependencies": {
     "electron": "^45.3.2",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "htm": "3.1.1",
+    "preact": "11.2.0"
   }
 }
